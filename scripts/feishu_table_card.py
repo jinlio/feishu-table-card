@@ -66,13 +66,18 @@ def _build_session() -> requests.Session:
     return session
 
 
+import threading
+
 _session: requests.Session | None = None
+_session_lock = threading.Lock()
 
 
 def _get_session() -> requests.Session:
     global _session
     if _session is None:
-        _session = _build_session()
+        with _session_lock:
+            if _session is None:
+                _session = _build_session()
     return _session
 
 
@@ -96,16 +101,21 @@ def _is_separator_row(line: str) -> bool:
     return all(re.match(r"^\s*[-:]+\s*$", cell) for cell in cells)
 
 
-def _extract_table_and_surrounding(text: str) -> tuple[str, str, str]:
+def _extract_all_tables(text: str) -> list[tuple[str, str, str]]:
     """
-    Extract markdown table from text, returning (before, table, after).
-    If no table found, returns (text, "", "").
+    Extract all markdown tables from text.
+    Returns list of (before, table, after) tuples, one per table found.
+    If no table found, returns [(text, "", "")].
     """
     lines = text.splitlines()
-    table_start = None
-    table_end = None
+    tables = []
+    consumed = set()
+
     i = 0
     while i < len(lines):
+        if i in consumed:
+            i += 1
+            continue
         stripped = lines[i].strip()
         if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
             if i + 1 < len(lines):
@@ -122,16 +132,20 @@ def _extract_table_and_surrounding(text: str) -> tuple[str, str, str]:
                             else:
                                 break
                         table_end = j
-                        break
+                        table_text = "\n".join(lines[table_start:table_end])
+                        before = "\n".join(lines[:table_start]).strip()
+                        after = "\n".join(lines[table_end:]).strip()
+                        tables.append((before, table_text, after))
+                        for k in range(table_start, table_end):
+                            consumed.add(k)
+                        i = table_end
+                        continue
         i += 1
 
-    if table_start is None:
-        return text, "", ""
+    if not tables:
+        return [(text, "", "")]
 
-    before = "\n".join(lines[:table_start]).strip()
-    table_text = "\n".join(lines[table_start:table_end])
-    after = "\n".join(lines[table_end:]).strip()
-    return before, table_text, after
+    return tables
 
 
 def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str], list[list[str]]]:
@@ -156,8 +170,9 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
         )
 
     def parse_row(line):
-        cleaned = re.sub(r'(?<!\\)\\|', '\x00PIPE\x00', line)
-        cells = [cell.strip().replace('\x00PIPE\x00', '|') for cell in cleaned.strip().strip("|").split("|")]
+        cleaned = line.replace('\\\\', '\x00DBSLASH\x00')
+        cleaned = re.sub(r'(?<!\\)\\|', '\x00PIPE\x00', cleaned)
+        cells = [cell.strip().replace('\x00PIPE\x00', '|').replace('\x00DBSLASH\x00', '\\\\') for cell in cleaned.strip().strip("|").split("|")]
         return cells
 
     headers = parse_row(table_lines[0])
@@ -285,18 +300,28 @@ def send_text_message(token: str, receive_id: str, text: str) -> dict:
 
 def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "Data Table") -> tuple[bool, str]:
     """
-    Convert a markdown table to a plain-text bullet list and send as text.
-    Preserves non-table content before/after the table.
+    Convert markdown tables to plain-text bullet lists and send as text.
+    Preserves non-table content. Handles multiple tables.
     Last resort fallback when card mode fails.
     Returns (success: bool, message: str).
     """
-    before, table_text, after = _extract_table_and_surrounding(markdown_text)
-    if not table_text:
+    all_tables = _extract_all_tables(markdown_text)
+    if all_tables == [(markdown_text, "", "")]:
         full_text = markdown_text
     else:
-        headers, rows = parse_markdown_table(table_text)
-        bullet_text = table_to_bullet_list(headers, rows, title)
-        parts = [p for p in [before, bullet_text, after] if p]
+        parts = []
+        for before, table_text, after in all_tables:
+            if before:
+                parts.append(before)
+            if table_text:
+                try:
+                    headers, rows = parse_markdown_table(table_text)
+                    bullet_text = table_to_bullet_list(headers, rows, title)
+                    parts.append(bullet_text)
+                except ValueError:
+                    parts.append(table_text)
+            if after:
+                parts.append(after)
         full_text = "\n\n".join(parts)
     token = get_tenant_token()
     result = send_text_message(token, chat_id, full_text)

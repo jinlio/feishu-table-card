@@ -25,14 +25,22 @@ if [ -z "$PYTHON_CMD" ]; then
     exit 1
 fi
 
-HERMES_DIR="${HERMES_DIR:-$($PYTHON_CMD -c "import importlib.util; spec=importlib.util.find_spec('gateway'); print(spec.origin.rsplit('/',1)[0]) if spec and spec.origin else ''" 2>/dev/null || true)}"
+HERMES_DIR="${HERMES_DIR:-$($PYTHON_CMD -c "
+import importlib.util, os
+spec = importlib.util.find_spec('gateway')
+if spec and spec.origin:
+    base = spec.origin.rsplit('/',1)[0]
+    feishu_path = os.path.join(base, 'gateway', 'platforms', 'feishu.py')
+    if os.path.isfile(feishu_path):
+        print(base)
+" 2>/dev/null || true)}"
 
 if [ -z "$HERMES_DIR" ]; then
     HERMES_DIR="$($PYTHON_CMD -c "
 import site, glob, os
 for sp in site.getsitepackages() + [site.getusersitepackages()]:
-    p = os.path.join(sp, 'gateway')
-    if os.path.isdir(p):
+    feishu_path = os.path.join(sp, 'gateway', 'platforms', 'feishu.py')
+    if os.path.isfile(feishu_path):
         print(sp)
         break
 else:
@@ -42,7 +50,8 @@ else:
                     '/usr/local/lib/python3*/dist-packages',
                     '/usr/lib64/python3*/site-packages']:
         for d in glob.glob(pattern):
-            if os.path.isdir(os.path.join(d, 'gateway')):
+            feishu_path = os.path.join(d, 'gateway', 'platforms', 'feishu.py')
+            if os.path.isfile(feishu_path):
                 print(d)
                 break
 " 2>/dev/null || true)"
@@ -144,9 +153,9 @@ insert_pos = class_match.end()
 src = src[:insert_pos] + helper_method + src[insert_pos:]
 
 # 2. Modify _build_outbound_payload to detect tables and use post+tag:md
-# Find the _build_outbound_payload method
+# Find the _build_outbound_payload method and extract the content parameter name
 method_match = re.search(
-    r'(def _build_outbound_payload\s*\([^)]*\)\s*[^:]*:\s*\n)',
+    r'def _build_outbound_payload\s*\([^)]*\)\s*[^:]*:\s*\n',
     src
 )
 if not method_match:
@@ -154,18 +163,39 @@ if not method_match:
     print("Hermes version may be incompatible. Please patch manually.")
     sys.exit(1)
 
-# Find the first significant code line after the method definition
-# We insert our table detection right after the method def line
+# Extract the parameter that holds the message content
+# Look for common parameter names: content, text, message, body, msg, outbound_text
+method_sig = src[method_match.start():method_match.end()]
+param_names = re.findall(r'(\w+)\s*:', method_sig)
+if not param_names:
+    param_names = re.findall(r'(\w+)[,\)]', method_sig)
+
+content_var = None
+for candidate in ['content', 'text', 'message', 'body', 'msg', 'outbound_text']:
+    if candidate in param_names:
+        content_var = candidate
+        break
+
+if not content_var:
+    # Fallback: use the last positional parameter (excluding self)
+    non_self = [p for p in param_names if p != 'self']
+    if non_self:
+        content_var = non_self[-1]
+    else:
+        print("ERROR: Cannot determine content parameter name in _build_outbound_payload.")
+        print("Method signature: " + method_sig.strip())
+        sys.exit(1)
+
 method_start = method_match.end()
 
 table_detection = '''
         {marker}
         # Detect markdown tables and send as post+tag:md instead of plain text
-        post_payload = self._build_post_with_md(content)
+        post_payload = self._build_post_with_md({content_var})
         if post_payload:
             return post_payload
         {marker}_SKIP
-'''.format(marker=marker)
+'''.format(marker=marker, content_var=content_var)
 
 src = src[:method_start] + table_detection + src[method_start:]
 
@@ -204,21 +234,25 @@ escaped = re.escape(marker)
 with open(feishu_path, "r", encoding="utf-8") as f:
     src = f.read()
 
-# Remove everything between MARKER and MARKER_END (inclusive) — helper method
-src = re.sub(
-    r'\n\s*' + escaped + r'.*?' + escaped + r'_END\n',
-    '\n',
-    src,
-    flags=re.DOTALL,
-)
+# Remove helper method: exact marker line -> exact marker_END line
+helper_start = src.find(marker + '\n')
+while helper_start != -1:
+    helper_end = src.find(marker + '_END\n', helper_start)
+    if helper_end == -1:
+        break
+    end_pos = helper_end + len(marker) + len('_END\n')
+    src = src[:helper_start] + src[end_pos:]
+    helper_start = src.find(marker + '\n')
 
-# Remove everything between MARKER and MARKER_SKIP (inclusive) — table detection
-src = re.sub(
-    r'\n\s*' + escaped + r'.*?' + escaped + r'_SKIP\n',
-    '\n',
-    src,
-    flags=re.DOTALL,
-)
+# Remove table detection: exact marker line -> exact marker_SKIP line
+detect_start = src.find(marker + '\n')
+while detect_start != -1:
+    detect_end = src.find(marker + '_SKIP\n', detect_start)
+    if detect_end == -1:
+        break
+    end_pos = detect_end + len(marker) + len('_SKIP\n')
+    src = src[:detect_start] + src[end_pos:]
+    detect_start = src.find(marker + '\n')
 
 with open(feishu_path, "w", encoding="utf-8") as f:
     f.write(src)
