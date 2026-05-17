@@ -112,8 +112,21 @@ helper_method = '''
     def _build_post_with_md(self, content: str) -> dict:
         """Build a post+tag:md payload for markdown content containing tables."""
         import json, re
-        _TABLE_RE = re.compile(r"^\\|.*\\|\\r?\\n\\|[-|: ]+\\|", re.MULTILINE)
-        if not _TABLE_RE.search(content):
+        def _has_markdown_table(text):
+            lines = text.split("\\n")
+            i = 0
+            while i < len(lines):
+                stripped = lines[i].strip()
+                if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+                    if i + 1 < len(lines):
+                        sep = lines[i + 1].strip()
+                        if sep.startswith("|") and sep.endswith("|"):
+                            cells = sep.strip("|").split("|")
+                            if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
+                                return True
+                i += 1
+            return False
+        if not _has_markdown_table(content):
             return None
         return {{
             "msg_type": "post",
@@ -161,15 +174,6 @@ with open(feishu_path, "w", encoding="utf-8") as f:
 
 print("Patched FeishuAdapter: added _build_post_with_md() and table detection in _build_outbound_payload")
 PATCH_SCRIPT
-
-    # Copy config.json and script to ~/.feishu-table-patch/scripts/
-    INSTALL_DIR="$HOME/.feishu-table-patch/scripts"
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-    mkdir -p "$INSTALL_DIR"
-    cp "$SCRIPT_DIR/scripts/config.json" "$INSTALL_DIR/config.json"
-    cp "$SCRIPT_DIR/scripts/feishu_table_card.py" "$INSTALL_DIR/feishu_table_card.py"
-    echo "Installed config and script to $INSTALL_DIR"
 
     echo ""
     echo "Patch applied successfully!"
@@ -221,13 +225,6 @@ with open(feishu_path, "w", encoding="utf-8") as f:
 
 print("Removed patch from feishu.py")
 UNPATCH_SCRIPT
-    fi
-
-    # Remove installed files
-    INSTALL_DIR="$HOME/.feishu-table-patch"
-    if [ -d "$INSTALL_DIR" ]; then
-        rm -rf "$INSTALL_DIR"
-        echo "Removed installed files from $INSTALL_DIR"
     fi
 
     echo "Patch uninstalled successfully!"

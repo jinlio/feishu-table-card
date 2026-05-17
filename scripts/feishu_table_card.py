@@ -37,7 +37,10 @@ _config = _load_config()
 
 
 def _get_config(key: str, default=None):
-    return _config.get(key, os.getenv(f"FEISHU_CARD_{key.upper()}", default))
+    val = _config.get(key)
+    if val is not None:
+        return val
+    return os.getenv(f"FEISHU_CARD_{key.upper()}", default)
 
 
 def _get_app_id() -> str:
@@ -93,6 +96,44 @@ def _is_separator_row(line: str) -> bool:
     return all(re.match(r"^\s*[-:]+\s*$", cell) for cell in cells)
 
 
+def _extract_table_and_surrounding(text: str) -> tuple[str, str, str]:
+    """
+    Extract markdown table from text, returning (before, table, after).
+    If no table found, returns (text, "", "").
+    """
+    lines = text.splitlines()
+    table_start = None
+    table_end = None
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+            if i + 1 < len(lines):
+                sep = lines[i + 1].strip()
+                if sep.startswith("|") and sep.endswith("|"):
+                    cells = sep.strip("|").split("|")
+                    if all(re.match(r"^\s*[-:]+\s*$", c) for c in cells):
+                        table_start = i
+                        j = i + 2
+                        while j < len(lines):
+                            s = lines[j].strip()
+                            if s.startswith("|") and s.endswith("|"):
+                                j += 1
+                            else:
+                                break
+                        table_end = j
+                        break
+        i += 1
+
+    if table_start is None:
+        return text, "", ""
+
+    before = "\n".join(lines[:table_start]).strip()
+    table_text = "\n".join(lines[table_start:table_end])
+    after = "\n".join(lines[table_end:]).strip()
+    return before, table_text, after
+
+
 def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str], list[list[str]]]:
     """
     Parse a Markdown table from text.
@@ -115,7 +156,9 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
         )
 
     def parse_row(line):
-        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+        cleaned = re.sub(r'(?<!\\)\\|', '\x00PIPE\x00', line)
+        cells = [cell.strip().replace('\x00PIPE\x00', '|') for cell in cleaned.strip().strip("|").split("|")]
+        return cells
 
     headers = parse_row(table_lines[0])
     rows = [parse_row(line) for line in table_lines[1:]]
@@ -243,15 +286,22 @@ def send_text_message(token: str, receive_id: str, text: str) -> dict:
 def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "Data Table") -> tuple[bool, str]:
     """
     Convert a markdown table to a plain-text bullet list and send as text.
+    Preserves non-table content before/after the table.
     Last resort fallback when card mode fails.
     Returns (success: bool, message: str).
     """
-    headers, rows = parse_markdown_table(markdown_text)
-    bullet_text = table_to_bullet_list(headers, rows, title)
+    before, table_text, after = _extract_table_and_surrounding(markdown_text)
+    if not table_text:
+        full_text = markdown_text
+    else:
+        headers, rows = parse_markdown_table(table_text)
+        bullet_text = table_to_bullet_list(headers, rows, title)
+        parts = [p for p in [before, bullet_text, after] if p]
+        full_text = "\n\n".join(parts)
     token = get_tenant_token()
-    result = send_text_message(token, chat_id, bullet_text)
+    result = send_text_message(token, chat_id, full_text)
     if result.get("code") == 0:
-        return True, f"Table sent as text (fallback). {len(rows)} rows delivered to Feishu."
+        return True, f"Table sent as text (fallback). Delivered to Feishu."
     else:
         return False, f"Failed: {result.get('msg', result.get('errmsg', 'unknown'))}"
 
