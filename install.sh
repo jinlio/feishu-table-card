@@ -107,14 +107,15 @@ if not class_match:
 
 helper_method = '''
     {marker}
-    _MARKDOWN_TABLE_RE = re.compile(r"^\\|.*\\|\\n\\|[-|: ]+\\|", re.MULTILINE)
-
     def _build_post_with_md(self, content: str) -> dict:
         """Build a post+tag:md payload for markdown content containing tables."""
-        import os, json
+        import os, json, re
+        _TABLE_RE = re.compile(r"^\\|.*\\|\\n\\|[-|: ]+\\|", re.MULTILINE)
+        if not _TABLE_RE.search(content):
+            return None
         script_dir = os.path.join(os.path.expanduser("~"), ".hermes", "skills", "productivity", "feishu-table-card", "scripts")
         config_path = os.path.join(script_dir, "config.json")
-        config = {}
+        config = {{}}
         if os.path.exists(config_path):
             with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
@@ -162,10 +163,9 @@ method_start = method_match.end()
 table_detection = '''
         {marker}
         # Detect markdown tables and send as post+tag:md instead of plain text
-        if self._MARKDOWN_TABLE_RE.search(content):
-            post_payload = self._build_post_with_md(content)
-            if post_payload:
-                return post_payload
+        post_payload = self._build_post_with_md(content)
+        if post_payload:
+            return post_payload
         {marker}_SKIP
 '''.format(marker=marker)
 
