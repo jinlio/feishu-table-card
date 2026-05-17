@@ -25,7 +25,7 @@ if [ -z "$PYTHON_CMD" ]; then
     exit 1
 fi
 
-HERMES_DIR="${HERMES_DIR:-$($PYTHON_CMD -c "import importlib.util; spec=importlib.util.find_spec('gateway'); print(spec.origin.rsplit('/',1)[0]) if spec else ''" 2>/dev/null || true)}"
+HERMES_DIR="${HERMES_DIR:-$($PYTHON_CMD -c "import importlib.util; spec=importlib.util.find_spec('gateway'); print(spec.origin.rsplit('/',1)[0]) if spec and spec.origin else ''" 2>/dev/null || true)}"
 
 if [ -z "$HERMES_DIR" ]; then
     HERMES_DIR="$($PYTHON_CMD -c "
@@ -36,9 +36,11 @@ for sp in site.getsitepackages() + [site.getusersitepackages()]:
         print(sp)
         break
 else:
-    # Try virtualenv
     for pattern in [os.path.expanduser('~/.virtualenvs/*/lib/python3*/site-packages'),
-                    '/opt/venvs/*/lib/python3*/site-packages']:
+                    '/opt/venvs/*/lib/python3*/site-packages',
+                    '/usr/lib/python3/dist-packages',
+                    '/usr/local/lib/python3*/dist-packages',
+                    '/usr/lib64/python3*/site-packages']:
         for d in glob.glob(pattern):
             if os.path.isdir(os.path.join(d, 'gateway')):
                 print(d)
@@ -59,7 +61,7 @@ MARKER="# [FEISHU-TABLE-CARD-PATCH]"
 action="${1:-install}"
 
 check_patch() {
-    if grep -q "$MARKER" "$FEISHU_PY" 2>/dev/null; then
+    if grep -qF "$MARKER" "$FEISHU_PY" 2>/dev/null; then
         return 0
     else
         return 1
@@ -89,7 +91,7 @@ install_patch() {
 
     # Patch: Insert a helper method and modify _build_outbound_payload
     # to detect markdown tables and send as post+tag:md instead of plain text
-    $PYTHON_CMD << 'PATCH_SCRIPT'
+    $PYTHON_CMD - "$FEISHU_PY" << 'PATCH_SCRIPT'
 import re, sys
 
 feishu_path = sys.argv[1]
@@ -110,17 +112,17 @@ helper_method = '''
     def _build_post_with_md(self, content: str) -> dict:
         """Build a post+tag:md payload for markdown content containing tables."""
         import json, re
-        _TABLE_RE = re.compile(r"^\\|.*\\|\\n\\|[-|: ]+\\|", re.MULTILINE)
+        _TABLE_RE = re.compile(r"^\\|.*\\|\\r?\\n\\|[-|: ]+\\|", re.MULTILINE)
         if not _TABLE_RE.search(content):
             return None
         return {{
             "msg_type": "post",
-            "content": json.dumps({{
+            "content": {{
                 "zh_cn": {{
                     "title": "",
                     "content": [[{{"tag": "md", "text": content}}]],
                 }}
-            }}, ensure_ascii=False),
+            }},
         }}
     {marker}_END
 '''.format(marker=marker)
@@ -159,7 +161,6 @@ with open(feishu_path, "w", encoding="utf-8") as f:
 
 print("Patched FeishuAdapter: added _build_post_with_md() and table detection in _build_outbound_payload")
 PATCH_SCRIPT
-    "$FEISHU_PY"
 
     # Copy config.json and script to ~/.hermes/skills/productivity/feishu-table-card/scripts/
     SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card/scripts"
@@ -189,18 +190,19 @@ uninstall_patch() {
         echo "Restored feishu.py from backup."
     else
         # Remove patch markers manually
-        $PYTHON_CMD << 'UNPATCH_SCRIPT'
+        $PYTHON_CMD - "$FEISHU_PY" << 'UNPATCH_SCRIPT'
 import re, sys
 
 feishu_path = sys.argv[1]
 marker = "# [FEISHU-TABLE-CARD-PATCH]"
+escaped = re.escape(marker)
 
 with open(feishu_path, "r", encoding="utf-8") as f:
     src = f.read()
 
 # Remove everything between MARKER and MARKER_END (inclusive) — helper method
 src = re.sub(
-    r'\n\s*' + marker + r'.*?' + marker + r'_END\n',
+    r'\n\s*' + escaped + r'.*?' + escaped + r'_END\n',
     '\n',
     src,
     flags=re.DOTALL,
@@ -208,7 +210,7 @@ src = re.sub(
 
 # Remove everything between MARKER and MARKER_SKIP (inclusive) — table detection
 src = re.sub(
-    r'\n\s*' + marker + r'.*?' + marker + r'_SKIP\n',
+    r'\n\s*' + escaped + r'.*?' + escaped + r'_SKIP\n',
     '\n',
     src,
     flags=re.DOTALL,
@@ -219,7 +221,6 @@ with open(feishu_path, "w", encoding="utf-8") as f:
 
 print("Removed patch from feishu.py")
 UNPATCH_SCRIPT
-        "$FEISHU_PY"
     fi
 
     # Remove skill files

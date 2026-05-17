@@ -21,7 +21,7 @@ Converts Markdown (tables + rich text) to Feishu post messages.
 Hermes's `FeishuAdapter._build_outbound_payload` detects markdown tables
 and forces plain text, which breaks table rendering. This skill patches
 that method to send tables as `msg_type: post` + `tag: md` instead,
-with full GFM markdown support and an optional footer showing agent/model info.
+with full GFM markdown support.
 
 **No LLM invocation required** — the patch runs at the adapter level,
 intercepting outbound messages before they are sent.
@@ -35,8 +35,7 @@ intercepting outbound messages before they are sent.
     "zh_cn": {
       "title": "",
       "content": [
-        [{"tag": "md", "text": "| Col1 | Col2 |\n|---|---|\n| A | B |"}],
-        [{"tag": "md", "text": "---\n🤖 Hermes Agent | Model: gpt-4o"}]
+        [{"tag": "md", "text": "| Col1 | Col2 |\n|---|---|\n| A | B |"}]
       ]
     }
   }
@@ -61,19 +60,14 @@ Edit `scripts/config.json`:
 ```json
 {
   "card_title": null,
-  "header_template": "blue",
-  "footer_agent": "Hermes Agent",
-  "footer_model": null
+  "header_template": "blue"
 }
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `footer_agent` | `"Hermes Agent"` | Agent name in footer. `null` = hide. |
-| `footer_model` | `null` | Model name in footer. `null` = hide. |
-
-Environment variable overrides: `FEISHU_CARD_FOOTER_AGENT`, `FEISHU_CARD_FOOTER_MODEL`,
-`HERMES_AGENT_NAME`, `HERMES_MODEL_NAME`.
+| `card_title` | `null` | Card header title (legacy --card mode). `null` = no header. |
+| `header_template` | `"blue"` | Header color template (legacy --card mode). |
 
 ## CLI Usage (Standalone)
 
@@ -107,7 +101,7 @@ from feishu_table_card import (
 
 | Version | Changes |
 |---------|---------|
-| v10.0.0 | Primary mode: post+tag:md. Patch _build_outbound_payload directly (no hook/LLM). Footer with agent/model. |
+| v10.0.0 | Primary mode: post+tag:md. Patch _build_outbound_payload directly (no hook/LLM). |
 | v9.2.0 | Added outgoing:feishu hook + install.sh patch. |
 | v9.1.0 | Card header optional. config.json. Env var overrides. |
 | v9.0.0 | Added header field. Lazy _session. Removed leaked credentials. |

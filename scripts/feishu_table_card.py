@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 feishu_table_card.py
 Convert Markdown (tables + rich text) to Feishu messages.
 
 Primary method: msg_type: post + tag: md (rich text post message).
 Supports ALL markdown syntax: tables, bold, italic, code blocks, lists, etc.
-Footer: agent and model info appended automatically.
 Fallback: Schema 2.0 interactive card + tag: markdown, then plain text bullet list.
 """
 
@@ -277,7 +277,9 @@ def send_with_fallback(chat_id: str, markdown_text: str, title: str | None = Non
             if success:
                 return msg
         except ValueError as e:
-            return f"Auth error: {e}"
+            if "FEISHU_APP_ID" in str(e) or "FEISHU_APP_SECRET" in str(e):
+                return f"Auth error: {e}"
+            last_error = e
         except Exception as e:
             last_error = e
 
