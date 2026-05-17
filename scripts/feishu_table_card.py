@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 """
-feishu_table_card.py
+feishu_table_card.py — Part of feishu-table-patch
 Convert Markdown (tables + rich text) to Feishu messages.
 
 Primary method: msg_type: post + tag: md (rich text post message).

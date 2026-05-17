@@ -1,14 +1,10 @@
-# Feishu Table Card — Hermes Skill
+# Feishu Table Patch
 
-> 一个 [Hermes](https://github.com/anomalyco/hermes) 技能插件，把 Markdown 表格渲染为飞书富文本消息。
+> 让 Hermes Agent 的飞书适配器正确渲染 Markdown 表格。
 
-**核心用法：** 一行命令安装 patch，Hermes 发送含表格的消息时自动转为飞书富文本，无需 LLM 参与！
+Hermes 的飞书适配器检测到 Markdown 表格时，会强制用纯文本 `msg_type: text` 发送，导致表格在飞书中无法正确渲染。本工具通过 patch 适配器，让检测到表格时改用 `msg_type: post` + `tag: md` 发送富文本消息，表格完美渲染。
 
-## 问题背景
-
-Hermes 的飞书适配器 `FeishuAdapter._build_outbound_payload` 检测到 Markdown 表格时，会强制用纯文本 `msg_type: text` 发送，导致表格在飞书中无法正确渲染。
-
-本技能通过 patch 该方法，让检测到表格时改用 `msg_type: post` + `tag: md` 发送富文本消息，表格完美渲染。
+**核心优势：** 一行命令安装 patch，自动生效，无需 LLM 参与，零 token 消耗。
 
 ## 功能特性
 
@@ -21,14 +17,13 @@ Hermes 的飞书适配器 `FeishuAdapter._build_outbound_payload` 检测到 Mark
 ## 安装
 
 ```bash
-# 克隆到 skills 目录
-cp -r feishu-table-card ~/.hermes/skills/productivity/
+git clone git@github.com:jinlio/feishu-table-patch.git
+cd feishu-table-patch
 
 # 安装依赖
 pip install requests
 
 # 安装 patch（自动修改 Hermes 飞书适配器）
-cd ~/.hermes/skills/productivity/feishu-table-card
 bash install.sh
 
 # 检查 patch 状态
@@ -72,7 +67,7 @@ export FEISHU_APP_SECRET="xxxxx"
 ### 命令行（独立使用）
 
 ```bash
-cd ~/.hermes/skills/productivity/feishu-table-card/scripts
+cd feishu-table-patch/scripts
 
 # Post 模式（默认）
 python3 feishu_table_card.py "oc_xxxx" "| Model | Price |
@@ -91,7 +86,7 @@ python3 feishu_table_card.py --text "oc_xxxx" "| Model | Price | ..."
 ```python
 from feishu_table_card import (
     build_feishu_post,          # 构建 post+tag:md payload
-    send_markdown_as_post,     # 发送 markdown 为 post 消息（主模式）
+    send_markdown_as_post,      # 发送 markdown 为 post 消息（主模式）
     build_feishu_card,          # 构建 schema 2.0 卡片（旧版）
     send_markdown_as_card,      # 发送 markdown 为卡片（旧版）
     send_with_fallback,         # post -> card -> text 降级链
@@ -142,8 +137,7 @@ Post 模式（`tag: md`）支持 GFM 全部语法：
 ## 项目结构
 
 ```
-feishu-table-card/
-├── SKILL.md                        # Hermes Skill 定义（v10.0.0）
+feishu-table-patch/
 ├── README.md                       # 本文件
 ├── install.sh                      # Patch 安装脚本（修改 _build_outbound_payload）
 ├── scripts/
@@ -157,7 +151,7 @@ feishu-table-card/
 
 ## 关于
 
-本技能由 **[jinlio](https://github.com/jinlio)** 开发维护。
+由 **[jinlio](https://github.com/jinlio)** 开发维护。
 
 版本历史：
 - **v10.0.0** — 主模式改为 post+tag:md；直接 patch _build_outbound_payload（跳过 LLM）

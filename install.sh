@@ -162,14 +162,14 @@ with open(feishu_path, "w", encoding="utf-8") as f:
 print("Patched FeishuAdapter: added _build_post_with_md() and table detection in _build_outbound_payload")
 PATCH_SCRIPT
 
-    # Copy config.json and script to ~/.hermes/skills/productivity/feishu-table-card/scripts/
-    SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card/scripts"
+    # Copy config.json and script to ~/.feishu-table-patch/scripts/
+    INSTALL_DIR="$HOME/.feishu-table-patch/scripts"
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-    mkdir -p "$SKILLS_DIR"
-    cp "$SCRIPT_DIR/scripts/config.json" "$SKILLS_DIR/config.json"
-    cp "$SCRIPT_DIR/scripts/feishu_table_card.py" "$SKILLS_DIR/feishu_table_card.py"
-    echo "Installed config and script to $SKILLS_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cp "$SCRIPT_DIR/scripts/config.json" "$INSTALL_DIR/config.json"
+    cp "$SCRIPT_DIR/scripts/feishu_table_card.py" "$INSTALL_DIR/feishu_table_card.py"
+    echo "Installed config and script to $INSTALL_DIR"
 
     echo ""
     echo "Patch applied successfully!"
@@ -223,11 +223,11 @@ print("Removed patch from feishu.py")
 UNPATCH_SCRIPT
     fi
 
-    # Remove skill files
-    SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card"
-    if [ -d "$SKILLS_DIR" ]; then
-        rm -rf "$SKILLS_DIR"
-        echo "Removed skill files from $SKILLS_DIR"
+    # Remove installed files
+    INSTALL_DIR="$HOME/.feishu-table-patch"
+    if [ -d "$INSTALL_DIR" ]; then
+        rm -rf "$INSTALL_DIR"
+        echo "Removed installed files from $INSTALL_DIR"
     fi
 
     echo "Patch uninstalled successfully!"
