@@ -100,7 +100,14 @@ result = send_table_with_fallback("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | 
 | 飞书卡片 `tag: table` 空白 | 飞书客户端 Bug，API 返回成功但表格身为空 | 使用 `tag: markdown` 模式 |
 | `tag: lark_md` 报错 | 错误的 tag 名称 | 使用 `tag: md` |
 | `elements` 报 `unknown property` | 结构少了 `body` 层 | 使用 `body.elements` |
-| Hermes 无法 100% 自动触发本技能 | SKILL.md 的 triggers 关键词匹配依赖 Hermes 的意图识别，当用户消息中包含 Markdown 表格但未提及"表格""table"等关键词时，Hermes 可能不会调用本技能 | **欢迎提出解决方案！** 可能的方向：1) 在 Hermes 层增加输出内容格式检测（检测 `|...|` 模式自动路由）；2) 扩展 triggers 关键词覆盖更多场景；3) 将本技能注册为 Hermes 的 post-processor，对所有含表格的输出自动介入 |
+
+### Hermes 无法 100% 自动触发本技能
+
+SKILL.md 的 triggers 关键词匹配依赖 Hermes 的意图识别，当用户消息中包含 Markdown 表格但未提及"表格""table"等关键词时，Hermes 可能不会调用本技能。**欢迎提出解决方案！** 可能的方向：
+
+1. 在 Hermes 层增加输出内容格式检测（检测 `|...|` 模式自动路由）
+2. 扩展 triggers 关键词覆盖更多场景
+3. 将本技能注册为 Hermes 的 post-processor，对所有含表格的输出自动介入
 
 > 如果你有其他想法或改进方案，欢迎 [提交 Issue](https://github.com/jinlio/feishu-table-card/issues) 或 PR！
 
