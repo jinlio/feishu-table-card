@@ -278,33 +278,25 @@ def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "
 def send_with_fallback(chat_id: str, markdown_text: str, title: str | None = None) -> str:
     """
     Try sending in order: post -> card -> text.
+    Auth errors (missing credentials) fail fast without retrying.
     Returns status message describing what succeeded or what final error occurred.
     """
     last_error = None
 
-    # 1. Try post + tag:md mode (primary)
-    try:
-        success, msg = send_markdown_as_post(chat_id, markdown_text)
-        if success:
-            return msg
-    except Exception as e:
-        last_error = e
-
-    # 2. Try card mode (legacy)
-    try:
-        success, msg = send_markdown_as_card(chat_id, markdown_text, title=title)
-        if success:
-            return msg
-    except Exception as e:
-        last_error = e
-
-    # 3. Last resort: plain text bullet list
-    try:
-        success, msg = send_table_as_text_fallback(chat_id, markdown_text, title or "Data Table")
-        if success:
-            return msg
-    except Exception as e:
-        last_error = e
+    for sender in [send_markdown_as_post, send_markdown_as_card, send_table_as_text_fallback]:
+        try:
+            if sender == send_table_as_text_fallback:
+                success, msg = sender(chat_id, markdown_text, title or "Data Table")
+            elif sender == send_markdown_as_card:
+                success, msg = sender(chat_id, markdown_text, title=title)
+            else:
+                success, msg = sender(chat_id, markdown_text)
+            if success:
+                return msg
+        except ValueError as e:
+            return f"Auth error: {e}"
+        except Exception as e:
+            last_error = e
 
     return f"All send modes failed. Last error: {last_error}"
 
@@ -342,9 +334,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send Markdown (tables + rich text) to Feishu.")
     parser.add_argument("chat_id", nargs="?", help="Feishu chat ID")
     parser.add_argument("table_text", nargs="?", help="Markdown table/text (or read from stdin)")
-    parser.add_argument("--post", action="store_true", default=True, help="Send as post+tag:md message (default)")
-    parser.add_argument("--card", action="store_true", help="Send as interactive card (legacy)")
-    parser.add_argument("--text", action="store_true", help="Send as plain text bullet list (fallback)")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--post", action="store_true", help="Send as post+tag:md message (default)")
+    mode_group.add_argument("--card", action="store_true", help="Send as interactive card (legacy)")
+    mode_group.add_argument("--text", action="store_true", help="Send as plain text bullet list (fallback)")
     parser.add_argument("--fallback", action="store_true", default=True, help="Try post -> card -> text automatically (default)")
     parser.add_argument("--no-fallback", dest="fallback", action="store_false", help="Disable fallback, only try selected mode")
     parser.add_argument("--title", default=None, help="Card title (omit to hide header, only for --card mode)")
@@ -356,7 +349,7 @@ if __name__ == "__main__":
         table_text = sys.stdin.read().strip()
 
     if not args.chat_id:
-        print("Usage: python feishu_table_card.py <chat_id> '<markdown>' [--post|--card|--text]")
+        print("Usage: python feishu_table_card.py <chat_id> '<markdown>' [--post|--card|--text]", file=sys.stderr)
         sys.exit(1)
 
     if args.text:

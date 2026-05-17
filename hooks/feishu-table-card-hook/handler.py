@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import subprocess
@@ -24,14 +23,15 @@ def handle(event_type, context):
 
     try:
         result = subprocess.run(
-            [sys.executable, _SCRIPT_PATH, "--post", "--no-fallback", chat_id, content],
+            [sys.executable, _SCRIPT_PATH, "--post", "--no-fallback", chat_id],
+            input=content,
             capture_output=True,
             text=True,
             timeout=30,
             env={**os.environ, "FEISHU_APP_ID": os.getenv("FEISHU_APP_ID", ""),
                  "FEISHU_APP_SECRET": os.getenv("FEISHU_APP_SECRET", "")},
         )
-        if result.returncode == 0 and "successfully" in result.stdout.lower():
+        if result.returncode == 0:
             return {"_consumed": True}
     except Exception:
         pass
