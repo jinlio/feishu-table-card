@@ -74,11 +74,10 @@ _session_lock = threading.Lock()
 
 def _get_session() -> requests.Session:
     global _session
-    if _session is None:
-        with _session_lock:
-            if _session is None:
-                _session = _build_session()
-    return _session
+    with _session_lock:
+        if _session is None:
+            _session = _build_session()
+        return _session
 
 
 def get_tenant_token() -> str:
@@ -101,21 +100,18 @@ def _is_separator_row(line: str) -> bool:
     return all(re.match(r"^\s*[-:]+\s*$", cell) for cell in cells)
 
 
-def _extract_all_tables(text: str) -> list[tuple[str, str, str]]:
+def _extract_all_tables(text: str) -> list[tuple[str, str]]:
     """
-    Extract all markdown tables from text.
-    Returns list of (before, table, after) tuples, one per table found.
-    If no table found, returns [(text, "", "")].
+    Extract all markdown tables from text, splitting into segments.
+    Returns list of (segment_text, is_table) pairs.
+    Non-table segments keep their original text; table segments
+    contain just the table lines for parsing.
     """
     lines = text.splitlines()
-    tables = []
-    consumed = set()
-
+    segments: list[tuple[str, str]] = []
     i = 0
+
     while i < len(lines):
-        if i in consumed:
-            i += 1
-            continue
         stripped = lines[i].strip()
         if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
             if i + 1 < len(lines):
@@ -123,7 +119,6 @@ def _extract_all_tables(text: str) -> list[tuple[str, str, str]]:
                 if sep.startswith("|") and sep.endswith("|"):
                     cells = sep.strip("|").split("|")
                     if all(re.match(r"^\s*[-:]+\s*$", c) for c in cells):
-                        table_start = i
                         j = i + 2
                         while j < len(lines):
                             s = lines[j].strip()
@@ -131,21 +126,29 @@ def _extract_all_tables(text: str) -> list[tuple[str, str, str]]:
                                 j += 1
                             else:
                                 break
-                        table_end = j
-                        table_text = "\n".join(lines[table_start:table_end])
-                        before = "\n".join(lines[:table_start]).strip()
-                        after = "\n".join(lines[table_end:]).strip()
-                        tables.append((before, table_text, after))
-                        for k in range(table_start, table_end):
-                            consumed.add(k)
-                        i = table_end
+                        table_text = "\n".join(lines[i:j])
+                        segments.append((table_text, "table"))
+                        i = j
                         continue
-        i += 1
+        non_table_lines = []
+        while i < len(lines):
+            s = lines[i].strip()
+            if s.startswith("|") and s.endswith("|") and len(s) > 2:
+                if i + 1 < len(lines):
+                    sep = lines[i + 1].strip()
+                    if sep.startswith("|") and sep.endswith("|"):
+                        cells = sep.strip("|").split("|")
+                        if all(re.match(r"^\s*[-:]+\s*$", c) for c in cells):
+                            break
+            non_table_lines.append(lines[i])
+            i += 1
+        if non_table_lines:
+            segments.append((" ".join(non_table_lines).strip(), "text"))
 
-    if not tables:
-        return [(text, "", "")]
+    if not segments:
+        return [(text, "text")]
 
-    return tables
+    return segments
 
 
 def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str], list[list[str]]]:
@@ -305,23 +308,23 @@ def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "
     Last resort fallback when card mode fails.
     Returns (success: bool, message: str).
     """
-    all_tables = _extract_all_tables(markdown_text)
-    if all_tables == [(markdown_text, "", "")]:
+    segments = _extract_all_tables(markdown_text)
+    has_table = any(kind == "table" for _, kind in segments)
+    if not has_table:
         full_text = markdown_text
     else:
         parts = []
-        for before, table_text, after in all_tables:
-            if before:
-                parts.append(before)
-            if table_text:
+        for seg_text, kind in segments:
+            if kind == "table":
                 try:
-                    headers, rows = parse_markdown_table(table_text)
+                    headers, rows = parse_markdown_table(seg_text)
                     bullet_text = table_to_bullet_list(headers, rows, title)
                     parts.append(bullet_text)
                 except ValueError:
-                    parts.append(table_text)
-            if after:
-                parts.append(after)
+                    parts.append(seg_text)
+            else:
+                if seg_text:
+                    parts.append(seg_text)
         full_text = "\n\n".join(parts)
     token = get_tenant_token()
     result = send_text_message(token, chat_id, full_text)
