@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# install.sh — Patch Hermes Agent to add outgoing:feishu hook point
+# install.sh — Patch Hermes Agent's FeishuAdapter to send markdown tables as post+tag:md
 # Usage: ./install.sh          (install patch)
 #        ./install.sh --uninstall  (remove patch)
 #        ./install.sh --check      (check if patch is applied)
 #
-# This script is idempotent and safe: it backs up files before patching,
-# and detects existing patches to avoid double-injection.
+# This script patches Hermes's _build_outbound_payload method so that when
+# it detects a markdown table in outbound content, it sends it as a
+# msg_type: post + tag: md message instead of plain text.
+# The patch is idempotent and reversible.
 
 set -euo pipefail
 
 HERMES_DIR="${HERMES_DIR:-$(pip show hermes-agent 2>/dev/null | grep -oP 'Location: \K.*' | head -1)}"
 if [ -z "$HERMES_DIR" ]; then
-    # Fallback: try common locations
     for candidate in \
         "$HOME/.local/lib/python3*/site-packages" \
         "/usr/local/lib/python3*/site-packages" \
@@ -30,9 +31,8 @@ if [ -z "$HERMES_DIR" ]; then
 fi
 
 FEISHU_PY="$HERMES_DIR/gateway/platforms/feishu.py"
-HOOKS_PY="$HERMES_DIR/gateway/hooks.py"
 
-MARKER="# [FEISHU-TABLE-CARD-HOOK-PATCH]"
+MARKER="# [FEISHU-TABLE-CARD-PATCH]"
 
 action="${1:-install}"
 
@@ -65,80 +65,115 @@ install_patch() {
 
     backup_file "$FEISHU_PY"
 
-    # Patch 1: Insert hook emit + override branch in send() method
-    # We insert after "Not connected" check, before format_message()
+    # Patch: Insert a helper method and modify _build_outbound_payload
+    # to detect markdown tables and send as post+tag:md instead of plain text
     python3 << 'PATCH_SCRIPT'
 import re, sys
 
 feishu_path = sys.argv[1]
-marker = "# [FEISHU-TABLE-CARD-HOOK-PATCH]"
+marker = "# [FEISHU-TABLE-CARD-PATCH]"
 
 with open(feishu_path, "r", encoding="utf-8") as f:
     src = f.read()
 
-# Find the send() method and insert hook after the "Not connected" early return
-# Pattern: after "return SendResult(success=False, error=\"Not connected\")"
-# we insert the hook block
+# 1. Insert helper method _build_post_with_md() at class level
+# Find the class definition line
+class_match = re.search(r'(class FeishuAdapter[^:]*:\s*\n)', src)
+if not class_match:
+    print("ERROR: Cannot find FeishuAdapter class definition.")
+    sys.exit(1)
 
-hook_block = '''
-        {marker}
-        hook_results = await self.hooks.emit_collect("outgoing:feishu", {{
-            "chat_id": chat_id,
-            "content": content,
-        }})
-        override = None
-        for result in hook_results:
-            if result and isinstance(result, dict) and "msg_type" in result and "payload" in result:
-                override = result
-                break
-        {marker}_END
+helper_method = '''
+    {marker}
+    _MARKDOWN_TABLE_RE = re.compile(r"^\\|.*\\|\\n\\|[-|: ]+\\|", re.MULTILINE)
 
-        if override:
-            response = await self._feishu_send_with_retry(
-                chat_id=chat_id,
-                msg_type=override["msg_type"],
-                payload=override["payload"],
-                reply_to=reply_to,
-                metadata=metadata,
-            )
-            return self._finalize_send_result(response, "send failed")
-        {marker}_SKIP'''.format(marker=marker)
+    def _build_post_with_md(self, content: str) -> dict:
+        """Build a post+tag:md payload for markdown content containing tables."""
+        import os, json
+        script_dir = os.path.join(os.path.expanduser("~"), ".hermes", "skills", "productivity", "feishu-table-card", "scripts")
+        config_path = os.path.join(script_dir, "config.json")
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
 
-# Insert after the "Not connected" return in send()
-pattern = r'(return SendResult\(success=False, error="Not connected"\)\s*\n)'
-match = re.search(pattern, src)
-if not match:
-    # Try alternate pattern with single quotes
-    pattern = r"(return SendResult\(success=False, error='Not connected'\)\s*\n)"
-    match = re.search(pattern, src)
+        def _gc(key, default=None):
+            return config.get(key, os.getenv(f"FEISHU_CARD_{{key.upper()}}", default))
 
-if not match:
-    print("ERROR: Cannot find 'Not connected' return in send() method.")
+        footer_parts = []
+        agent = _gc("footer_agent") or os.getenv("HERMES_AGENT_NAME", "")
+        model = _gc("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
+        if agent:
+            footer_parts.append(f"🤖 {{agent}}")
+        if model:
+            footer_parts.append(f"Model: {{model}}")
+
+        content_blocks = [[{{"tag": "md", "text": content}}]]
+        if footer_parts:
+            footer_text = "---\\n" + " | ".join(footer_parts)
+            content_blocks.append([{{"tag": "md", "text": footer_text}}])
+
+        return {{
+            "msg_type": "post",
+            "content": json.dumps({{
+                "zh_cn": {{
+                    "title": "",
+                    "content": content_blocks,
+                }}
+            }}, ensure_ascii=False),
+        }}
+    {marker}_END
+'''.format(marker=marker)
+
+insert_pos = class_match.end()
+src = src[:insert_pos] + helper_method + src[insert_pos:]
+
+# 2. Modify _build_outbound_payload to detect tables and use post+tag:md
+# Find the _build_outbound_payload method
+method_match = re.search(
+    r'(def _build_outbound_payload\s*\([^)]*\)\s*[^:]*:\s*\n)',
+    src
+)
+if not method_match:
+    print("ERROR: Cannot find _build_outbound_payload method.")
     print("Hermes version may be incompatible. Please patch manually.")
     sys.exit(1)
 
-insert_pos = match.end()
-src = src[:insert_pos] + hook_block + src[insert_pos:]
+# Find the first significant code line after the method definition
+# We insert our table detection right after the method def line
+method_start = method_match.end()
+
+table_detection = '''
+        {marker}
+        # Detect markdown tables and send as post+tag:md instead of plain text
+        if self._MARKDOWN_TABLE_RE.search(content):
+            post_payload = self._build_post_with_md(content)
+            if post_payload:
+                return post_payload
+        {marker}_SKIP
+'''.format(marker=marker)
+
+src = src[:method_start] + table_detection + src[method_start:]
 
 with open(feishu_path, "w", encoding="utf-8") as f:
     f.write(src)
 
-print("Patched send() method in feishu.py")
+print("Patched FeishuAdapter: added _build_post_with_md() and table detection in _build_outbound_payload")
 PATCH_SCRIPT
     "$FEISHU_PY"
 
-    # Copy hook files to ~/.hermes/hooks/
-    HOOKS_DIR="$HOME/.hermes/hooks/feishu-table-card-hook"
+    # Copy config.json to ~/.hermes/skills/productivity/feishu-table-card/scripts/
+    SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card/scripts"
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    SKILL_HOOKS_DIR="$SCRIPT_DIR/hooks/feishu-table-card-hook"
 
-    mkdir -p "$HOOKS_DIR"
-    cp "$SKILL_HOOKS_DIR/HOOK.yaml" "$HOOKS_DIR/HOOK.yaml"
-    cp "$SKILL_HOOKS_DIR/handler.py" "$HOOKS_DIR/handler.py"
-    echo "Installed hook files to $HOOKS_DIR"
+    mkdir -p "$SKILLS_DIR"
+    cp "$SCRIPT_DIR/scripts/config.json" "$SKILLS_DIR/config.json"
+    cp "$SCRIPT_DIR/scripts/feishu_table_card.py" "$SKILLS_DIR/feishu_table_card.py"
+    echo "Installed config and script to $SKILLS_DIR"
 
     echo ""
     echo "Patch applied successfully!"
+    echo "Hermes will now send markdown tables as post+tag:md messages."
     echo "Restart Hermes Agent to activate: hermes restart"
 }
 
@@ -159,12 +194,20 @@ uninstall_patch() {
 import re, sys
 
 feishu_path = sys.argv[1]
-marker = "# [FEISHU-TABLE-CARD-HOOK-PATCH]"
+marker = "# [FEISHU-TABLE-CARD-PATCH]"
 
 with open(feishu_path, "r", encoding="utf-8") as f:
     src = f.read()
 
-# Remove everything between MARKER and MARKER_SKIP (inclusive)
+# Remove everything between MARKER and MARKER_END (inclusive) — helper method
+src = re.sub(
+    r'\n\s*' + marker + r'.*?' + marker + r'_END\n',
+    '\n',
+    src,
+    flags=re.DOTALL,
+)
+
+# Remove everything between MARKER and MARKER_SKIP (inclusive) — table detection
 src = re.sub(
     r'\n\s*' + marker + r'.*?' + marker + r'_SKIP\n',
     '\n',
@@ -180,11 +223,11 @@ UNPATCH_SCRIPT
         "$FEISHU_PY"
     fi
 
-    # Remove hook files
-    HOOKS_DIR="$HOME/.hermes/hooks/feishu-table-card-hook"
-    if [ -d "$HOOKS_DIR" ]; then
-        rm -rf "$HOOKS_DIR"
-        echo "Removed hook files from $HOOKS_DIR"
+    # Remove skill files
+    SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card"
+    if [ -d "$SKILLS_DIR" ]; then
+        rm -rf "$SKILLS_DIR"
+        echo "Removed skill files from $SKILLS_DIR"
     fi
 
     echo "Patch uninstalled successfully!"

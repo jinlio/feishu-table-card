@@ -1,3 +1,0 @@
-name: feishu-table-card-hook
-description: Auto-convert markdown tables in outbound Feishu messages to interactive cards
-events: [outgoing:feishu]
