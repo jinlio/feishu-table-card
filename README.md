@@ -1,4 +1,4 @@
-# 🐑 Feishu Table Card
+# Feishu Table Card
 
 > 把 Markdown 表格（以及所有 Markdown 语法）渲染为飞书卡片的技能插件。
 
@@ -115,9 +115,9 @@ feishu-table-card/
     └── openclaw-post-md-approach.md      # OpenClaw 实现参考
 ```
 
-## 🐑 关于
+## 关于
 
-本技能由 **小羊** 开发维护，基于 OpenClaw 的飞书卡片方案改进。
+本技能由 **[jinlio](https://github.com/jinlio)** 开发维护，基于 OpenClaw 的飞书卡片方案改进。
 
 版本历史：
 - **v9.0.0** — 添加 `header` 字段（修复无 header 卡片渲染失败）；`send_markdown_as_card` 支持 `title` 参数；`_session` 懒加载；移除泄露的测试凭证
