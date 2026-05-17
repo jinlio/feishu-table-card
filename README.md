@@ -14,12 +14,26 @@
 ## 🔧 安装
 
 ```bash
-# 克隆或解压到 skills 目录
+# 克隆到 skills 目录
 cp -r feishu-table-card ~/.hermes/skills/productivity/
 
 # 安装依赖
 pip install requests
+
+# 安装 hook patch（自动拦截含表格的飞书消息并转为卡片）
+cd ~/.hermes/skills/productivity/feishu-table-card
+bash install.sh
+
+# 卸载 patch（还原 Hermes 原始代码）
+bash install.sh --uninstall
+
+# 检查 patch 状态
+bash install.sh --check
 ```
+
+> **注意：** `install.sh` 会自动 patch Hermes Agent 的飞书适配器，注入 `outgoing:feishu` hook 点。此 patch 是幂等的（重复运行不会重复注入），且可逆（`--uninstall` 还原）。Hermes 升级后需重新运行 `install.sh`。
+>
+> 我们正在向 Hermes Agent 提交 PR，将 `outgoing:feishu` hook 点加入官方核心。PR 合并后，`install.sh` 将不再需要。
 
 ## ⚙️ 配置
 
@@ -125,11 +139,11 @@ result = send_table_with_fallback("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | 
 
 ### Hermes 无法 100% 自动触发本技能
 
-SKILL.md 的 triggers 关键词匹配依赖 Hermes 的意图识别，当用户消息中包含 Markdown 表格但未提及"表格""table"等关键词时，Hermes 可能不会调用本技能。**欢迎提出解决方案！** 可能的方向：
+SKILL.md 的 triggers 关键词匹配依赖 Hermes 的意图识别，当用户消息中包含 Markdown 表格但未提及"表格""table"等关键词时，Hermes 可能不会调用本技能。
 
-1. 在 Hermes 层增加输出内容格式检测（检测 `|...|` 模式自动路由）
-2. 扩展 triggers 关键词覆盖更多场景
-3. 将本技能注册为 Hermes 的 post-processor，对所有含表格的输出自动介入
+**已解决：** `install.sh` 会在 Hermes 的飞书适配器中注入 `outgoing:feishu` hook 点，hook handler 自动检测出站消息中的 markdown 表格并转为飞书卡片，无需 AI 主动调用 skill。
+
+**长期方案：** 向 Hermes Agent 提交 PR，将 `outgoing:feishu` hook 点加入官方核心，彻底消除 patch 需求。
 
 > 如果你有其他想法或改进方案，欢迎 [提交 Issue](https://github.com/jinlio/feishu-table-card/issues) 或 PR！
 
@@ -137,11 +151,16 @@ SKILL.md 的 triggers 关键词匹配依赖 Hermes 的意图识别，当用户�
 
 ```
 feishu-table-card/
-├── SKILL.md                        # Hermes Skill 定义（v9.0.0）
+├── SKILL.md                        # Hermes Skill 定义（v9.1.0）
 ├── README.md                       # 本文件
+├── install.sh                      # Hook patch 安装脚本（幂等、可逆）
 ├── scripts/
 │   ├── config.json                # 卡片配置（标题栏、颜色模板）
 │   └── feishu_table_card.py        # 核心脚本
+├── hooks/
+│   └── feishu-table-card-hook/
+│       ├── HOOK.yaml               # Hook 定义（outgoing:feishu 事件）
+│       └── handler.py              # Hook handler（检测表格 → 转卡片）
 └── references/
     ├── feishu-table-rendering-issue.md  # 完整调试日志
     ├── feishu-card-table-api.md          # tag:table 格式文档
@@ -153,6 +172,7 @@ feishu-table-card/
 本技能由 **[jinlio](https://github.com/jinlio)** 开发维护，基于 OpenClaw 的飞书卡片方案改进。
 
 版本历史：
+- **v9.2.0** — 新增 `outgoing:feishu` hook + `install.sh` patch 脚本，自动拦截含表格的飞书消息并转为卡片
 - **v9.1.0** — 卡片标题栏改为可选（默认不显示）；新增 `config.json` 配置文件；环境变量覆盖支持
 - **v9.0.0** — 添加 `header` 字段；`send_markdown_as_card` 支持 `title` 参数；`_session` 懒加载；移除泄露的测试凭证
 - **v8.0.0** — 移除 Image 模式（matplotlib CJK 字体问题），Card 为唯一主模式，降级链 card → text

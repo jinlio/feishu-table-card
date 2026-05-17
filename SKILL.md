@@ -1,6 +1,6 @@
 ---
 name: feishu-table-card
-version: 9.1.0
+version: 9.2.0
 description: >
   Convert Markdown (tables + rich text) to Feishu card messages.
   **Primary: schema 2.0 interactive card + `tag: markdown` in `body.elements`** — renders as a proper
@@ -137,6 +137,7 @@ pip install requests
 
 | Version | Changes |
 |---------|---------|
+| v9.2.0 | Added `outgoing:feishu` hook + `install.sh` patch script for auto-intercepting table messages. |
 | v9.1.0 | Card header is now optional (default: no header). Added `config.json` for customization. Env var overrides. |
 | v9.0.0 | Added `header` field (fixes card rendering without header); `send_markdown_as_card` supports `title`; lazy `_session`; removed leaked credentials. |
 | v8.0.0 | Removed Image mode (matplotlib CJK font issues). Card is now the only mode. Fallback chain: card → text. |
