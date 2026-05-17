@@ -23,14 +23,32 @@ pip install requests
 
 ## ⚙️ 配置
 
-需要设置飞书应用凭证（从 [open.feishu.cn](https://open.feishu.cn) 创建应用获取）：
+### 飞书应用凭证
+
+从 [open.feishu.cn](https://open.feishu.cn) 创建应用获取：
 
 ```bash
 export FEISHU_APP_ID="cli_xxxxx"
 export FEISHU_APP_SECRET="xxxxx"
 ```
 
-或在调用时直接修改脚本顶部的默认值。
+### 卡片配置
+
+编辑 `scripts/config.json` 自定义卡片样式：
+
+```json
+{
+  "card_title": null,
+  "header_template": "blue"
+}
+```
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `card_title` | `null` | 卡片标题栏文字。`null` 表示不显示标题栏 |
+| `header_template` | `"blue"` | 标题栏颜色（blue/green/red/orange 等） |
+
+也可通过环境变量覆盖：`FEISHU_CARD_CARD_TITLE`、`FEISHU_CARD_HEADER_TEMPLATE`。
 
 ## 🚀 快速使用
 
@@ -39,12 +57,12 @@ export FEISHU_APP_SECRET="xxxxx"
 ```bash
 cd ~/.hermes/skills/productivity/feishu-table-card/scripts
 
-# Card 模式（默认，自动降级 card → text）
+# Card 模式（默认，无标题栏，自动降级 card → text）
 python3 feishu_table_card.py "oc_xxxx" "| Model | Price |
 | RTX 5090 | ¥16,999 |
 | RTX 4090 | ¥12,499 |"
 
-# 指定卡片标题
+# 指定卡片标题栏
 python3 feishu_table_card.py --title "GPU 价格表" "oc_xxxx" "| Model | Price |
 | RTX 5090 | ¥16,999 |
 | RTX 4090 | ¥12,499 |"
@@ -69,7 +87,11 @@ from feishu_table_card import (
     send_table_with_fallback,  # 自动降级 card → text
 )
 
-# Card 模式：传入原始 Markdown 字符串
+# Card 模式：无标题栏
+card = build_feishu_card("**标题**\n\n| Col1 | Col2 |\n|------|------|\n| A    | B    |")
+result = send_markdown_as_card("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | B |")
+
+# Card 模式：带标题栏
 card = build_feishu_card("**标题**\n\n| Col1 | Col2 |\n|------|------|\n| A    | B    |", title="My Card")
 result = send_markdown_as_card("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | B |", title="My Card")
 
@@ -118,7 +140,8 @@ feishu-table-card/
 ├── SKILL.md                        # Hermes Skill 定义（v9.0.0）
 ├── README.md                       # 本文件
 ├── scripts/
-│   └── feishu_table_card.py        # 核心脚本（含 tuple 返回值修复）
+│   ├── config.json                # 卡片配置（标题栏、颜色模板）
+│   └── feishu_table_card.py        # 核心脚本
 └── references/
     ├── feishu-table-rendering-issue.md  # 完整调试日志
     ├── feishu-card-table-api.md          # tag:table 格式文档
@@ -130,7 +153,8 @@ feishu-table-card/
 本技能由 **[jinlio](https://github.com/jinlio)** 开发维护，基于 OpenClaw 的飞书卡片方案改进。
 
 版本历史：
-- **v9.0.0** — 添加 `header` 字段（修复无 header 卡片渲染失败）；`send_markdown_as_card` 支持 `title` 参数；`_session` 懒加载；移除泄露的测试凭证
+- **v9.1.0** — 卡片标题栏改为可选（默认不显示）；新增 `config.json` 配置文件；环境变量覆盖支持
+- **v9.0.0** — 添加 `header` 字段；`send_markdown_as_card` 支持 `title` 参数；`_session` 懒加载；移除泄露的测试凭证
 - **v8.0.0** — 移除 Image 模式（matplotlib CJK 字体问题），Card 为唯一主模式，降级链 card → text
 - **v7.0.0** — 添加 retry、统一 timeout、CJK width、MAX_ROWS 保护、修复关键 bug
 - **v6.0.0** — 修复 `body.elements` 结构，Card 模式正常工作

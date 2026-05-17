@@ -22,6 +22,22 @@ BASE_URL = "https://open.feishu.cn/open-apis"
 DEFAULT_TIMEOUT = 15
 MAX_ROWS = 200
 
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def _load_config() -> dict:
+    if os.path.exists(_CONFIG_PATH):
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+_config = _load_config()
+
+
+def _get_config(key: str, default=None):
+    return _config.get(key, os.getenv(f"FEISHU_CARD_{key.upper()}", default))
+
 
 def _get_app_id() -> str:
     return os.getenv("FEISHU_APP_ID", "")
@@ -111,24 +127,27 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
 
 # ─── Card-based rendering (primary) ─────────────────────────────────────────
 
-def build_feishu_card(markdown_content: str, title: str = "Message") -> dict:
+def build_feishu_card(markdown_content: str, title: str | None = None) -> dict:
     """
     Build a Feishu schema 2.0 card with full markdown content.
     Supports ALL markdown syntax: bold, italic, links, code, lists, tables, etc.
+    If title is None and config has no card_title, header is omitted.
     """
-    card = {
+    card: dict = {
         "schema": "2.0",
         "config": {"width_mode": "fill"},
-        "header": {
-            "title": {"tag": "plain_text", "content": title},
-            "template": "blue"
-        },
-        "body": {
-            "elements": [{
-                "tag": "markdown",
-                "content": markdown_content
-            }]
+    }
+    effective_title = title if title is not None else _get_config("card_title")
+    if effective_title:
+        card["header"] = {
+            "title": {"tag": "plain_text", "content": effective_title},
+            "template": _get_config("header_template", "blue")
         }
+    card["body"] = {
+        "elements": [{
+            "tag": "markdown",
+            "content": markdown_content
+        }]
     }
     return card
 
@@ -152,7 +171,7 @@ def send_card(token: str, receive_id: str, card: dict) -> dict:
     return _send_message(token, receive_id, "interactive", card)
 
 
-def send_markdown_as_card(chat_id: str, markdown_text: str, title: str = "Message") -> tuple[bool, str]:
+def send_markdown_as_card(chat_id: str, markdown_text: str, title: str | None = None) -> tuple[bool, str]:
     """
     Send arbitrary markdown (text + table) as a Feishu card.
     Uses schema 2.0 + body.elements + tag:markdown, supports ALL markdown syntax.
@@ -246,7 +265,7 @@ if __name__ == "__main__":
     parser.add_argument("--text", action="store_true", help="Send as plain text bullet list (fallback)")
     parser.add_argument("--fallback", action="store_true", default=True, help="Try card -> text automatically (default)")
     parser.add_argument("--no-fallback", dest="fallback", action="store_false", help="Disable fallback, only try card mode")
-    parser.add_argument("--title", default="Message", help="Card title (default: Message)")
+    parser.add_argument("--title", default=None, help="Card title (omit to hide header)")
     args = parser.parse_args()
 
     if args.table_text:
