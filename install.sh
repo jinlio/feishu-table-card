@@ -8,20 +8,42 @@
 # it detects a markdown table in outbound content, it sends it as a
 # msg_type: post + tag: md message instead of plain text.
 # The patch is idempotent and reversible.
+# Compatible with Linux and macOS.
 
 set -euo pipefail
 
-HERMES_DIR="${HERMES_DIR:-$(pip show hermes-agent 2>/dev/null | grep -oP 'Location: \K.*' | head -1)}"
+# Portable Python command detection
+PYTHON_CMD=""
+for cmd in python3 python; do
+    if command -v "$cmd" &>/dev/null; then
+        PYTHON_CMD="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: Python is not installed. Please install Python 3 first."
+    exit 1
+fi
+
+HERMES_DIR="${HERMES_DIR:-$($PYTHON_CMD -c "import importlib.util; spec=importlib.util.find_spec('gateway'); print(spec.origin.rsplit('/',1)[0]) if spec else ''" 2>/dev/null || true)}"
+
 if [ -z "$HERMES_DIR" ]; then
-    for candidate in \
-        "$HOME/.local/lib/python3*/site-packages" \
-        "/usr/local/lib/python3*/site-packages" \
-        "$(python3 -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null)"; do
-        if [ -d "$candidate/gateway" ]; then
-            HERMES_DIR="$candidate"
-            break
-        fi
-    done
+    HERMES_DIR="$($PYTHON_CMD -c "
+import site, glob, os
+for sp in site.getsitepackages() + [site.getusersitepackages()]:
+    p = os.path.join(sp, 'gateway')
+    if os.path.isdir(p):
+        print(sp)
+        break
+else:
+    # Try virtualenv
+    for pattern in [os.path.expanduser('~/.virtualenvs/*/lib/python3*/site-packages'),
+                    '/opt/venvs/*/lib/python3*/site-packages']:
+        for d in glob.glob(pattern):
+            if os.path.isdir(os.path.join(d, 'gateway')):
+                print(d)
+                break
+" 2>/dev/null || true)"
 fi
 
 if [ -z "$HERMES_DIR" ]; then
@@ -67,7 +89,7 @@ install_patch() {
 
     # Patch: Insert a helper method and modify _build_outbound_payload
     # to detect markdown tables and send as post+tag:md instead of plain text
-    python3 << 'PATCH_SCRIPT'
+    $PYTHON_CMD << 'PATCH_SCRIPT'
 import re, sys
 
 feishu_path = sys.argv[1]
@@ -162,7 +184,7 @@ print("Patched FeishuAdapter: added _build_post_with_md() and table detection in
 PATCH_SCRIPT
     "$FEISHU_PY"
 
-    # Copy config.json to ~/.hermes/skills/productivity/feishu-table-card/scripts/
+    # Copy config.json and script to ~/.hermes/skills/productivity/feishu-table-card/scripts/
     SKILLS_DIR="$HOME/.hermes/skills/productivity/feishu-table-card/scripts"
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -190,7 +212,7 @@ uninstall_patch() {
         echo "Restored feishu.py from backup."
     else
         # Remove patch markers manually
-        python3 << 'UNPATCH_SCRIPT'
+        $PYTHON_CMD << 'UNPATCH_SCRIPT'
 import re, sys
 
 feishu_path = sys.argv[1]
