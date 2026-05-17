@@ -116,38 +116,42 @@ if not class_match:
     print("ERROR: Cannot find FeishuAdapter class definition.")
     sys.exit(1)
 
+# Detect indentation style from existing methods in the class
+indent_match = re.search(r'\n(\s+)def \w+', src[class_match.end():])
+indent_str = indent_match.group(1) if indent_match else "    "
+
 helper_method = '''
-    {marker}
-    def _build_post_with_md(self, content: str) -> dict:
-        """Build a post+tag:md payload for markdown content containing tables."""
-        import json, re
-        def _has_markdown_table(text):
-            lines = text.split("\\n")
-            i = 0
-            while i < len(lines):
-                stripped = lines[i].strip()
-                if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
-                    if i + 1 < len(lines):
-                        sep = lines[i + 1].strip()
-                        if sep.startswith("|") and sep.endswith("|"):
-                            cells = sep.strip("|").split("|")
-                            if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
-                                return True
-                i += 1
-            return False
-        if not _has_markdown_table(content):
-            return None
-        return {{
-            "msg_type": "post",
-            "content": {{
-                "zh_cn": {{
-                    "title": "",
-                    "content": [[{{"tag": "md", "text": content}}]],
-                }}
-            }},
-        }}
-    {marker}_END
-'''.format(marker=marker)
+{indent_str}{marker}
+{indent_str}def _build_post_with_md(self, content: str) -> dict:
+{indent_str}    """Build a post+tag:md payload for markdown content containing tables."""
+{indent_str}    import json, re
+{indent_str}    def _has_markdown_table(text):
+{indent_str}        lines = text.split("\\n")
+{indent_str}        i = 0
+{indent_str}        while i < len(lines):
+{indent_str}            stripped = lines[i].strip()
+{indent_str}            if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+{indent_str}                if i + 1 < len(lines):
+{indent_str}                    sep = lines[i + 1].strip()
+{indent_str}                    if sep.startswith("|") and sep.endswith("|"):
+{indent_str}                        cells = sep.strip("|").split("|")
+{indent_str}                        if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
+{indent_str}                            return True
+{indent_str}                i += 1
+{indent_str}        return False
+{indent_str}    if not _has_markdown_table(content):
+{indent_str}        return None
+{indent_str}    return {{
+{indent_str}        "msg_type": "post",
+{indent_str}        "content": {{
+{indent_str}            "zh_cn": {{
+{indent_str}                "title": "",
+{indent_str}                "content": [[{{"tag": "md", "text": content}}]],
+{indent_str}            }}
+{indent_str}        }},
+{indent_str}    }}
+{indent_str}{marker}_END
+'''.format(marker=marker, indent_str=indent_str)
 
 insert_pos = class_match.end()
 src = src[:insert_pos] + helper_method + src[insert_pos:]
@@ -160,6 +164,13 @@ method_match = re.search(
 )
 if not method_match:
     print("ERROR: Cannot find _build_outbound_payload method.")
+    print("Hermes version may be incompatible. Please patch manually.")
+    sys.exit(1)
+
+# Verify this is the exact method (not a variant like _build_outbound_payload_async)
+method_name = re.search(r'def (\w+)', src[method_match.start():method_match.end()])
+if method_name and method_name.group(1) != "_build_outbound_payload":
+    print("ERROR: Found method variant '" + method_name.group(1) + "' instead of '_build_outbound_payload'.")
     print("Hermes version may be incompatible. Please patch manually.")
     sys.exit(1)
 

@@ -338,7 +338,7 @@ def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "
 def send_with_fallback(chat_id: str, markdown_text: str, title: str | None = None) -> str:
     """
     Try sending in order: post -> card -> text.
-    Auth errors (missing credentials) fail fast without retrying.
+    Auth errors (missing credentials) and token failures fail fast without retrying.
     Returns status message describing what succeeded or what final error occurred.
     """
     last_error = None
@@ -353,8 +353,8 @@ def send_with_fallback(chat_id: str, markdown_text: str, title: str | None = Non
                 success, msg = sender(chat_id, markdown_text)
             if success:
                 return msg
-        except ValueError as e:
-            if "FEISHU_APP_ID" in str(e) or "FEISHU_APP_SECRET" in str(e):
+        except (ValueError, RuntimeError) as e:
+            if "FEISHU_APP_ID" in str(e) or "FEISHU_APP_SECRET" in str(e) or "Token request failed" in str(e):
                 return f"Auth error: {e}"
             last_error = e
         except Exception as e:
