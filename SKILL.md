@@ -1,14 +1,12 @@
 ---
 name: feishu-table-card
-version: 9.2.0
+version: 10.0.0
 description: >
-  Convert Markdown (tables + rich text) to Feishu card messages.
-  **Primary: schema 2.0 interactive card + `tag: markdown` in `body.elements`** — renders as a proper
-  full-card. Supports ALL markdown syntax: tables, bold, italic, code blocks, blockquotes, lists.
-  Fallback: plain text bullet list when card fails.
-  Triggers: "send table", "render table", "feishu table", "表格发飞书", "发表格",
-  "render markdown", "send markdown", "markdown table".
-tags: [feishu, lark, table, markdown, card, productivity, chinese]
+  Convert Markdown (tables + rich text) to Feishu post messages.
+  **Primary: msg_type: post + tag: md** — renders as rich text with full GFM support.
+  Fallback: Schema 2.0 interactive card + tag: markdown, then plain text bullet list.
+  Auto-triggered by outgoing:feishu hook (no LLM needed).
+tags: [feishu, lark, table, markdown, post, card, productivity, chinese]
 env:
   FEISHU_APP_ID: "Feishu app ID (from open.feishu.cn)"
   FEISHU_APP_SECRET: "Feishu app secret"
@@ -16,97 +14,82 @@ env:
 
 # Feishu Table Card Skill
 
-Converts Markdown (tables + rich text) to Feishu card messages.
+Converts Markdown (tables + rich text) to Feishu post messages.
 
-## ✅ Primary: Schema 2.0 Card + `tag: markdown` in `body.elements`
+## Primary: Post Message + `tag: md`
 
-Uses a schema 2.0 interactive card with `tag: markdown` inside `body.elements`.
-Renders as a **proper full-card** (not text-embedded). Supports ALL markdown syntax.
+Uses `msg_type: post` with `tag: md` inside `zh_cn.content`.
+Renders as **rich text** with full GFM markdown support (tables, bold, code blocks, etc.).
+No title. Footer with agent/model info if configured.
 
-**Card structure (with header):**
+**Post structure:**
 ```json
 {
-  "schema": "2.0",
-  "config": {"width_mode": "fill"},
-  "header": {
-    "title": {"tag": "plain_text", "content": "Card Title"},
-    "template": "blue"
-  },
-  "body": {
-    "elements": [{
-      "tag": "markdown",
-      "content": "**Title**\n\n| Col1 | Col2 |\n|------|------|\n| A    | B    |"
-    }]
+  "msg_type": "post",
+  "content": {
+    "zh_cn": {
+      "title": "",
+      "content": [
+        [{"tag": "md", "text": "| Col1 | Col2 |\n|---|---|\n| A | B |"}],
+        [{"tag": "md", "text": "---\n🤖 Hermes Agent | Model: gpt-4o"}]
+      ]
+    }
   }
 }
 ```
 
-**Card structure (without header):**
-```json
-{
-  "schema": "2.0",
-  "config": {"width_mode": "fill"},
-  "body": {
-    "elements": [{
-      "tag": "markdown",
-      "content": "**Title**\n\n| Col1 | Col2 |\n|------|------|\n| A    | B    |"
-    }]
-  }
-}
-```
+**Supported markdown syntax (GFM):** tables, bold (`**`), italics (`*`),
+inline code (`` ` ``), code blocks (```` ``` ````), headers (`#`), links (`[]()`),
+lists (`- item`, `1. item`), blockquotes (`>`), `---`.
 
-Header is optional. Set `card_title` in `scripts/config.json` or pass `--title` to enable it.
+## Auto-Trigger via Hook (No LLM Required)
 
-**Must use `body.elements`** — top-level `elements` (no `body`) fails with `unknown property elements`.
+The `outgoing:feishu` hook automatically detects markdown tables in outbound
+messages and converts them to post messages. The handler calls the script
+via CLI subprocess — no LLM invocation, no token waste.
 
-**Supported markdown syntax:** tables, bold (`**`), italics (`*`),
-inline code (`` ` ``), code blocks (```` ``` ````), headers (`#`), lists, blockquotes (`>`), `---`.
+## Legacy: Schema 2.0 Card + `tag: markdown`
 
-## ⚠️ `tag: lark_md` Returns Error
-
-Use `tag: md` instead.
-
-## ⚠️ `tag: table` Has Client Bug
-
-Feishu's interactive card `tag: table` has a confirmed client bug — API returns `code: 0`
-but the table body is blank. Use `tag: markdown` instead.
+Still available via `--card` flag. Uses schema 2.0 interactive card with
+`tag: markdown` inside `body.elements`. Header is optional.
 
 ## Usage
 
 ```bash
 cd ~/.hermes/skills/productivity/feishu-table-card/scripts
 
-# Primary: raw markdown (text + table) → schema 2.0 card (no header by default)
+# Primary: post + tag:md (default)
 python3 feishu_table_card.py "oc_xxxx" "| Model | Price |
 | RTX 5090 | ¥16,999 |
 | RTX 4090 | ¥12,499 |"
 
-# With custom title (shows header bar)
-python3 feishu_table_card.py --title "GPU Price" "oc_xxxx" "| Model | Price | ..."
+# Legacy: interactive card
+python3 feishu_table_card.py --card "oc_xxxx" "| Model | Price | ..."
 
-# Text fallback: plain bullet list (last resort)
-python3 feishu_table_card.py --text "oc_xxxx" "| Model | Price |
-..."
+# Text fallback: plain bullet list
+python3 feishu_table_card.py --text "oc_xxxx" "| Model | Price | ..."
+
+# No fallback (only try selected mode)
+python3 feishu_table_card.py --no-fallback "oc_xxxx" "| Model | Price | ..."
 ```
 
 ### Python API
 
 ```python
 from feishu_table_card import (
-    build_feishu_card,          # build schema 2.0 card
-    send_markdown_as_card,      # send markdown as card (primary)
-    send_table_as_text_fallback, # text bullet list (fallback)
-    send_table_with_fallback,   # card -> text fallback chain
+    build_feishu_post,          # build post+tag:md payload
+    send_markdown_as_post,     # send markdown as post message (primary)
+    build_feishu_card,          # build schema 2.0 card (legacy)
+    send_markdown_as_card,      # send markdown as card (legacy)
+    send_with_fallback,         # post -> card -> text fallback chain
+    send_table_as_text_fallback,
 )
 
-# Primary: pass raw markdown string (no header)
-result = send_markdown_as_card("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | B |")
+# Primary: post + tag:md
+result = send_markdown_as_post("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | B |")
 
-# With header
-result = send_markdown_as_card("oc_xxxx", "| Col1 | Col2 |\n|---|---|\n| A | B |", title="My Card")
-
-# Fallback chain: try card, then text
-result = send_table_with_fallback("oc_xxxx", "| Col1 | Col2 |", title="My Card")
+# Fallback chain: post -> card -> text
+result = send_with_fallback("oc_xxxx", "| Col1 | Col2 |")
 ```
 
 ## Configuration
@@ -116,16 +99,24 @@ Edit `scripts/config.json` to customize defaults:
 ```json
 {
   "card_title": null,
-  "header_template": "blue"
+  "header_template": "blue",
+  "footer_agent": "Hermes Agent",
+  "footer_model": null
 }
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `card_title` | `null` | Default card header title. `null` = no header. |
-| `header_template` | `"blue"` | Header color template (blue/green/red/orange/etc.) |
+| `card_title` | `null` | Card header title (legacy --card mode). `null` = no header. |
+| `header_template` | `"blue"` | Header color template (legacy --card mode) |
+| `footer_agent` | `"Hermes Agent"` | Agent name shown in footer. `null` = hide. |
+| `footer_model` | `null` | Model name shown in footer. `null` = hide. |
 
-Environment variable overrides: `FEISHU_CARD_CARD_TITLE`, `FEISHU_CARD_HEADER_TEMPLATE`.
+Environment variable overrides:
+- `FEISHU_CARD_CARD_TITLE`, `FEISHU_CARD_HEADER_TEMPLATE`
+- `FEISHU_CARD_FOOTER_AGENT`, `FEISHU_CARD_FOOTER_MODEL`
+- `HERMES_AGENT_NAME` (fallback for footer_agent)
+- `HERMES_MODEL_NAME` (fallback for footer_model)
 
 ## Dependencies
 
@@ -137,13 +128,10 @@ pip install requests
 
 | Version | Changes |
 |---------|---------|
+| v10.0.0 | Primary mode changed to post+tag:md. Hook handler uses subprocess CLI (no LLM). Footer with agent/model info. |
 | v9.2.0 | Added `outgoing:feishu` hook + `install.sh` patch script for auto-intercepting table messages. |
 | v9.1.0 | Card header is now optional (default: no header). Added `config.json` for customization. Env var overrides. |
-| v9.0.0 | Added `header` field (fixes card rendering without header); `send_markdown_as_card` supports `title`; lazy `_session`; removed leaked credentials. |
-| v8.0.0 | Removed Image mode (matplotlib CJK font issues). Card is now the only mode. Fallback chain: card → text. |
-| v7.0.0 | OpenCode review: added retry, unified timeout, CJK width, MAX_ROWS protection, fixed critical bugs. |
-| v6.0.0 | Fixed `body.elements` structure. Card mode works properly. |
-- `body.elements` missing `body` wrapper → `unknown property elements` API error
+| v9.0.0 | Added `header` field; `send_markdown_as_card` supports `title`; lazy `_session`; removed leaked credentials. |
 
 ## Implementation Details
 
@@ -151,16 +139,15 @@ pip install requests
 - `MAX_ROWS = 200` — table row truncation protection
 - `_build_session()` — `requests.Session` with `HTTPAdapter` + `Retry` (429/5xx exponential backoff, 3 retries)
 - `_send_message()` — unified internal sender used by `send_card` and `send_text_message`
-- `table_to_bullet_list` — `title_emoji` parameter (default 📊), can be set to any emoji or empty string
-- `get_tenant_token()` — validates `FEISHU_APP_ID`/`FEISHU_APP_SECRET` before requesting token
-- `parse_markdown_table()` — strips separator rows, truncates to `MAX_ROWS`, raises `ValueError` if table is malformed
+- `build_feishu_post()` — builds post+tag:md payload with optional footer
+- `send_markdown_as_post()` — primary send method, no title, footer with agent/model
+- `send_with_fallback()` — fallback chain: post -> card -> text
+- Handler uses `subprocess.run()` to call script CLI, no Python import coupling
 
 ## References
 
-- `references/feishu-table-rendering-issue.md` — Full debugging log: API format attempts,
-  error codes, root cause analysis for tag:table blank bug.
-- `references/feishu-card-table-api.md` — Correct (but non-rendering) `tag: table` format.
 - `references/openclaw-post-md-approach.md` — OpenClaw's `buildFeishuPostMessagePayload`
-  implementation. Source: `.openclaw/npm/node_modules/@openclaw/feishu/dist/send-DowxxbpH.js` lines ~1034.
-- `references/body-elements-fix.md` — Root cause: top-level `elements` without `body` wrapper
-  causes API error 200621; fix is `body.elements` structure.
+  implementation with `tag: md`.
+- `references/feishu-table-rendering-issue.md` — Full debugging log for tag:table blank bug.
+- `references/feishu-card-table-api.md` — Correct (but non-rendering) `tag: table` format.
+- `references/body-elements-fix.md` — Root cause: top-level `elements` without `body` wrapper.

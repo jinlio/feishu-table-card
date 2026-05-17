@@ -1,4 +1,6 @@
 {
   "card_title": null,
-  "header_template": "blue"
+  "header_template": "blue",
+  "footer_agent": "Hermes Agent",
+  "footer_model": null
 }

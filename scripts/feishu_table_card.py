@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 feishu_table_card.py
-Convert Markdown (tables + rich text) to Feishu card messages.
+Convert Markdown (tables + rich text) to Feishu messages.
 
-Primary method: Schema 2.0 interactive card + `tag: markdown` in body.elements.
+Primary method: msg_type: post + tag: md (rich text post message).
 Supports ALL markdown syntax: tables, bold, italic, code blocks, lists, etc.
-Fallback: plain text bullet list when card fails.
+Footer: agent and model info appended automatically.
+Fallback: Schema 2.0 interactive card + tag: markdown, then plain text bullet list.
 """
 
 import json
@@ -125,7 +126,52 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
     return headers, rows
 
 
-# ─── Card-based rendering (primary) ─────────────────────────────────────────
+def _build_footer_text() -> str:
+    agent = _get_config("footer_agent") or os.getenv("HERMES_AGENT_NAME", "")
+    model = _get_config("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
+    parts = []
+    if agent:
+        parts.append(f"🤖 {agent}")
+    if model:
+        parts.append(f"Model: {model}")
+    if not parts:
+        return ""
+    return "---\n" + " | ".join(parts)
+
+
+def build_feishu_post(markdown_content: str) -> dict:
+    """
+    Build a Feishu post message payload with tag: md.
+    No title. Footer with agent/model info if configured.
+    """
+    content_blocks = [[{"tag": "md", "text": markdown_content}]]
+    footer_text = _build_footer_text()
+    if footer_text:
+        content_blocks.append([{"tag": "md", "text": footer_text}])
+    return {
+        "zh_cn": {
+            "title": "",
+            "content": content_blocks,
+        }
+    }
+
+
+def send_markdown_as_post(chat_id: str, markdown_text: str) -> tuple[bool, str]:
+    """
+    Send markdown (text + table) as a Feishu post message with tag: md.
+    No title. Footer with agent/model info if configured.
+    Returns (success: bool, message: str).
+    """
+    post_content = build_feishu_post(markdown_text)
+    token = get_tenant_token()
+    result = _send_message(token, chat_id, "post", post_content)
+    if result.get("code") == 0:
+        return True, "Post message sent successfully!"
+    else:
+        return False, f"Failed: {result.get('msg', result.get('errmsg', 'unknown'))}"
+
+
+# ─── Card-based rendering (legacy) ─────────────────────────────────────────
 
 def build_feishu_card(markdown_content: str, title: str | None = None) -> dict:
     """
@@ -227,11 +273,45 @@ def send_table_as_text_fallback(chat_id: str, markdown_text: str, title: str = "
         return False, f"Failed: {result.get('msg', result.get('errmsg', 'unknown'))}"
 
 
-# ─── Fallback chain: card -> text ───────────────────────────────────────────
+# ─── Fallback chain: post -> card -> text ────────────────────────────────────
+
+def send_with_fallback(chat_id: str, markdown_text: str, title: str | None = None) -> str:
+    """
+    Try sending in order: post -> card -> text.
+    Returns status message describing what succeeded or what final error occurred.
+    """
+    last_error = None
+
+    # 1. Try post + tag:md mode (primary)
+    try:
+        success, msg = send_markdown_as_post(chat_id, markdown_text)
+        if success:
+            return msg
+    except Exception as e:
+        last_error = e
+
+    # 2. Try card mode (legacy)
+    try:
+        success, msg = send_markdown_as_card(chat_id, markdown_text, title=title)
+        if success:
+            return msg
+    except Exception as e:
+        last_error = e
+
+    # 3. Last resort: plain text bullet list
+    try:
+        success, msg = send_table_as_text_fallback(chat_id, markdown_text, title or "Data Table")
+        if success:
+            return msg
+    except Exception as e:
+        last_error = e
+
+    return f"All send modes failed. Last error: {last_error}"
+
 
 def send_table_with_fallback(chat_id: str, markdown_text: str, title: str = "Data Table") -> str:
     """
-    Try sending in order: card -> text.
+    Legacy fallback chain: card -> text.
     Returns status message describing what succeeded or what final error occurred.
     """
     last_error = None
@@ -259,13 +339,15 @@ def send_table_with_fallback(chat_id: str, markdown_text: str, title: str = "Dat
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Send Markdown (tables + rich text) to Feishu as a card.")
+    parser = argparse.ArgumentParser(description="Send Markdown (tables + rich text) to Feishu.")
     parser.add_argument("chat_id", nargs="?", help="Feishu chat ID")
     parser.add_argument("table_text", nargs="?", help="Markdown table/text (or read from stdin)")
+    parser.add_argument("--post", action="store_true", default=True, help="Send as post+tag:md message (default)")
+    parser.add_argument("--card", action="store_true", help="Send as interactive card (legacy)")
     parser.add_argument("--text", action="store_true", help="Send as plain text bullet list (fallback)")
-    parser.add_argument("--fallback", action="store_true", default=True, help="Try card -> text automatically (default)")
-    parser.add_argument("--no-fallback", dest="fallback", action="store_false", help="Disable fallback, only try card mode")
-    parser.add_argument("--title", default=None, help="Card title (omit to hide header)")
+    parser.add_argument("--fallback", action="store_true", default=True, help="Try post -> card -> text automatically (default)")
+    parser.add_argument("--no-fallback", dest="fallback", action="store_false", help="Disable fallback, only try selected mode")
+    parser.add_argument("--title", default=None, help="Card title (omit to hide header, only for --card mode)")
     args = parser.parse_args()
 
     if args.table_text:
@@ -274,13 +356,19 @@ if __name__ == "__main__":
         table_text = sys.stdin.read().strip()
 
     if not args.chat_id:
-        print("Usage: python feishu_table_card.py <chat_id> '<markdown>' [--text|--fallback]")
+        print("Usage: python feishu_table_card.py <chat_id> '<markdown>' [--post|--card|--text]")
         sys.exit(1)
 
     if args.text:
         _, result = send_table_as_text_fallback(args.chat_id, table_text, args.title)
-    elif args.fallback:
-        result = send_table_with_fallback(args.chat_id, table_text, args.title)
+    elif args.card:
+        if args.fallback:
+            result = send_table_with_fallback(args.chat_id, table_text, args.title)
+        else:
+            _, result = send_markdown_as_card(args.chat_id, table_text, args.title)
     else:
-        _, result = send_markdown_as_card(args.chat_id, table_text, args.title)
+        if args.fallback:
+            result = send_with_fallback(chat_id=args.chat_id, markdown_text=table_text, title=args.title)
+        else:
+            _, result = send_markdown_as_post(args.chat_id, table_text)
     print(result)

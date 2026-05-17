@@ -1,12 +1,16 @@
 import json
 import os
 import re
+import subprocess
 import sys
 
-sys.path.insert(0, os.path.expanduser("~/.hermes/skills/productivity/feishu-table-card/scripts"))
-from feishu_table_card import build_feishu_card, get_tenant_token
-
 _MARKDOWN_TABLE_RE = re.compile(r"^\|.*\|\n\|[-|: ]+\|", re.MULTILINE)
+
+_SCRIPT_DIR = os.path.join(
+    os.path.expanduser("~"),
+    ".hermes", "skills", "productivity", "feishu-table-card", "scripts",
+)
+_SCRIPT_PATH = os.path.join(_SCRIPT_DIR, "feishu_table_card.py")
 
 
 def handle(event_type, context):
@@ -14,12 +18,22 @@ def handle(event_type, context):
     if not _MARKDOWN_TABLE_RE.search(content):
         return None
 
-    try:
-        token = get_tenant_token()
-        card = build_feishu_card(content)
-        return {
-            "msg_type": "interactive",
-            "payload": json.dumps(card, ensure_ascii=False),
-        }
-    except Exception:
+    chat_id = context.get("chat_id", "")
+    if not chat_id:
         return None
+
+    try:
+        result = subprocess.run(
+            [sys.executable, _SCRIPT_PATH, "--post", "--no-fallback", chat_id, content],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, "FEISHU_APP_ID": os.getenv("FEISHU_APP_ID", ""),
+                 "FEISHU_APP_SECRET": os.getenv("FEISHU_APP_SECRET", "")},
+        )
+        if result.returncode == 0 and "successfully" in result.stdout.lower():
+            return {"_consumed": True}
+    except Exception:
+        pass
+
+    return None
