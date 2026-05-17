@@ -127,16 +127,10 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
 
 
 def _build_footer_text() -> str:
-    agent = _get_config("footer_agent") or os.getenv("HERMES_AGENT_NAME", "")
     model = _get_config("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
-    parts = []
-    if agent:
-        parts.append(f"🤖 {agent}")
-    if model:
-        parts.append(f"Model: {model}")
-    if not parts:
+    if not model:
         return ""
-    return "---\n" + " | ".join(parts)
+    return "---\nModel: " + model
 
 
 def build_feishu_post(markdown_content: str) -> dict:

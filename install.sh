@@ -122,17 +122,11 @@ helper_method = '''
         def _gc(key, default=None):
             return config.get(key, os.getenv(f"FEISHU_CARD_{{key.upper()}}", default))
 
-        footer_parts = []
-        agent = _gc("footer_agent") or os.getenv("HERMES_AGENT_NAME", "")
         model = _gc("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
-        if agent:
-            footer_parts.append(f"🤖 {{agent}}")
-        if model:
-            footer_parts.append(f"Model: {{model}}")
 
         content_blocks = [[{{"tag": "md", "text": content}}]]
-        if footer_parts:
-            footer_text = "---\\n" + " | ".join(footer_parts)
+        if model:
+            footer_text = "---\\nModel: " + model
             content_blocks.append([{{"tag": "md", "text": footer_text}}])
 
         return {{
