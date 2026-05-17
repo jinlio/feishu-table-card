@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import threading
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -143,7 +144,7 @@ def _extract_all_tables(text: str) -> list[tuple[str, str]]:
             non_table_lines.append(lines[i])
             i += 1
         if non_table_lines:
-            segments.append((" ".join(non_table_lines).strip(), "text"))
+            segments.append(("\n".join(non_table_lines).strip(), "text"))
 
     if not segments:
         return [(text, "text")]
