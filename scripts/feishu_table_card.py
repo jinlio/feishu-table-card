@@ -126,26 +126,15 @@ def parse_markdown_table(text: str, max_rows: int = MAX_ROWS) -> tuple[list[str]
     return headers, rows
 
 
-def _build_footer_text() -> str:
-    model = _get_config("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
-    if not model:
-        return ""
-    return "---\nModel: " + model
-
-
 def build_feishu_post(markdown_content: str) -> dict:
     """
     Build a Feishu post message payload with tag: md.
-    No title. Footer with agent/model info if configured.
+    No title, no footer.
     """
-    content_blocks = [[{"tag": "md", "text": markdown_content}]]
-    footer_text = _build_footer_text()
-    if footer_text:
-        content_blocks.append([{"tag": "md", "text": footer_text}])
     return {
         "zh_cn": {
             "title": "",
-            "content": content_blocks,
+            "content": [[{"tag": "md", "text": markdown_content}]],
         }
     }
 
@@ -153,7 +142,7 @@ def build_feishu_post(markdown_content: str) -> dict:
 def send_markdown_as_post(chat_id: str, markdown_text: str) -> tuple[bool, str]:
     """
     Send markdown (text + table) as a Feishu post message with tag: md.
-    No title. Footer with agent/model info if configured.
+    No title, no footer.
     Returns (success: bool, message: str).
     """
     post_content = build_feishu_post(markdown_text)

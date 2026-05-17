@@ -109,33 +109,16 @@ helper_method = '''
     {marker}
     def _build_post_with_md(self, content: str) -> dict:
         """Build a post+tag:md payload for markdown content containing tables."""
-        import os, json, re
+        import json, re
         _TABLE_RE = re.compile(r"^\\|.*\\|\\n\\|[-|: ]+\\|", re.MULTILINE)
         if not _TABLE_RE.search(content):
             return None
-        script_dir = os.path.join(os.path.expanduser("~"), ".hermes", "skills", "productivity", "feishu-table-card", "scripts")
-        config_path = os.path.join(script_dir, "config.json")
-        config = {{}}
-        if os.path.exists(config_path):
-            with open(config_path, encoding="utf-8") as f:
-                config = json.load(f)
-
-        def _gc(key, default=None):
-            return config.get(key, os.getenv(f"FEISHU_CARD_{{key.upper()}}", default))
-
-        model = _gc("footer_model") or os.getenv("HERMES_MODEL_NAME", "")
-
-        content_blocks = [[{{"tag": "md", "text": content}}]]
-        if model:
-            footer_text = "---\\nModel: " + model
-            content_blocks.append([{{"tag": "md", "text": footer_text}}])
-
         return {{
             "msg_type": "post",
             "content": json.dumps({{
                 "zh_cn": {{
                     "title": "",
-                    "content": content_blocks,
+                    "content": [[{{"tag": "md", "text": content}}]],
                 }}
             }}, ensure_ascii=False),
         }}
