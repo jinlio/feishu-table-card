@@ -1,6 +1,6 @@
-# Feishu Table Card
+# Feishu Table Card — Hermes Skill
 
-> 把 Markdown 表格（以及所有 Markdown 语法）渲染为飞书卡片的技能插件。
+> 一个 [Hermes](https://github.com/anomalyco/hermes) 技能插件，把 Markdown 表格（以及所有 Markdown 语法）渲染为飞书卡片。
 
 **核心用法：** 一行命令，把带表格的 Markdown 文本发送为飞书卡片，表格不再空白！
 
