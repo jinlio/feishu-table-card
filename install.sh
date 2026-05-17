@@ -166,9 +166,12 @@ if not method_match:
 # Extract the parameter that holds the message content
 # Look for common parameter names: content, text, message, body, msg, outbound_text
 method_sig = src[method_match.start():method_match.end()]
-param_names = re.findall(r'(\w+)\s*:', method_sig)
-if not param_names:
-    param_names = re.findall(r'(\w+)[,\)]', method_sig)
+params_match = re.search(r'\(([^)]*)\)', method_sig)
+param_names = []
+if params_match:
+    param_names = re.findall(r'(\w+)\s*:', params_match.group(1))
+    if not param_names:
+        param_names = re.findall(r'(\w+)[,\)]', params_match.group(1))
 
 content_var = None
 for candidate in ['content', 'text', 'message', 'body', 'msg', 'outbound_text']:

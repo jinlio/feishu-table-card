@@ -67,8 +67,6 @@ def _build_session() -> requests.Session:
     return session
 
 
-import threading
-
 _session: requests.Session | None = None
 _session_lock = threading.Lock()
 
