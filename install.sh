@@ -111,7 +111,7 @@ with open(feishu_path, "r", encoding="utf-8") as f:
 
 # 1. Insert helper method _build_post_with_md() at class level
 # Find the class definition line
-class_match = re.search(r'(class FeishuAdapter[^:]*:\s*\n)', src)
+class_match = re.search(r'(class FeishuAdapter\s*\([^)]*\)\s*:\s*\n)', src)
 if not class_match:
     print("ERROR: Cannot find FeishuAdapter class definition.")
     sys.exit(1)
@@ -137,18 +137,15 @@ helper_method = '''
 {indent_str}                        cells = sep.strip("|").split("|")
 {indent_str}                        if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
 {indent_str}                            return True
-{indent_str}                i += 1
+{indent_str}            i += 1
 {indent_str}        return False
 {indent_str}    if not _has_markdown_table(content):
 {indent_str}        return None
 {indent_str}    return {{
-{indent_str}        "msg_type": "post",
-{indent_str}        "content": {{
-{indent_str}            "zh_cn": {{
-{indent_str}                "title": "",
-{indent_str}                "content": [[{{"tag": "md", "text": content}}]],
-{indent_str}            }}
-{indent_str}        }},
+{indent_str}        "zh_cn": {{
+{indent_str}            "title": "",
+{indent_str}            "content": [[{{"tag": "md", "text": content}}]],
+{indent_str}        }}
 {indent_str}    }}
 {indent_str}{marker}_END
 '''.format(marker=marker, indent_str=indent_str)
@@ -207,7 +204,7 @@ table_detection = '''
         # Detect markdown tables and send as post+tag:md instead of plain text
         post_payload = self._build_post_with_md({content_var})
         if post_payload:
-            return post_payload
+            return "post", json.dumps(post_payload, ensure_ascii=False)
         {marker}_SKIP
 '''.format(marker=marker, content_var=content_var)
 
