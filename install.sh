@@ -99,7 +99,7 @@ install_patch() {
     backup_file "$FEISHU_PY"
 
     # Patch: Insert a helper method and modify _build_outbound_payload
-    # to detect markdown tables and send as post+tag:md instead of plain text
+    # to detect markdown tables and send as interactive card with native table component
     $PYTHON_CMD - "$FEISHU_PY" << 'PATCH_SCRIPT'
 import re, sys
 
@@ -122,9 +122,11 @@ indent_str = indent_match.group(1) if indent_match else "    "
 
 helper_method = '''
 {indent_str}{marker}
-{indent_str}def _build_post_with_md(self, content: str) -> dict:
-{indent_str}    """Build a post+tag:md payload for markdown content containing tables."""
+{indent_str}def _build_table_card(self, content: str) -> dict:
+{indent_str}    """Build interactive card with native table components + adaptive column width.
+{indent_str}    Returns None if no markdown table detected."""
 {indent_str}    import json, re
+{indent_str}
 {indent_str}    def _has_markdown_table(text):
 {indent_str}        lines = text.split("\\n")
 {indent_str}        i = 0
@@ -139,13 +141,130 @@ helper_method = '''
 {indent_str}                            return True
 {indent_str}            i += 1
 {indent_str}        return False
+{indent_str}
 {indent_str}    if not _has_markdown_table(content):
 {indent_str}        return None
+{indent_str}
+{indent_str}    def _display_width(text):
+{indent_str}        w = 0
+{indent_str}        for ch in text:
+{indent_str}            if '\\u4e00' <= ch <= '\\u9fff' or '\\u3000' <= ch <= '\\u303f' or '\\uff00' <= ch <= '\\uffef':
+{indent_str}                w += 2
+{indent_str}            else:
+{indent_str}                w += 1
+{indent_str}        return max(w, 1)
+{indent_str}
+{indent_str}    def _calc_column_widths(headers, rows):
+{indent_str}        widths = []
+{indent_str}        for i, h in enumerate(headers):
+{indent_str}            w = _display_width(h)
+{indent_str}            for row in rows:
+{indent_str}                if i < len(row):
+{indent_str}                    w = max(w, _display_width(row[i]))
+{indent_str}            widths.append(w)
+{indent_str}        total = sum(widths)
+{indent_str}        if total == 0:
+{indent_str}            return [f"{{100 // len(headers)}}%" for _ in headers]
+{indent_str}        pcts = [max(12, min(75, round(w / total * 100))) for w in widths]
+{indent_str}        diff = 100 - sum(pcts)
+{indent_str}        if diff != 0:
+{indent_str}            widest_idx = pcts.index(max(pcts))
+{indent_str}            pcts[widest_idx] += diff
+{indent_str}        return [f"{{p}}%" for p in pcts]
+{indent_str}
+{indent_str}    def _strip_markdown(text):
+{indent_str}        t = re.sub(r'\\!\\[([^\\]]*)\\]\\([^)]*\\)', r'\\1', text)  # images
+{indent_str}        t = re.sub(r'\\[([^\\]]+)\\]\\([^)]*\\)', r'\\1', t)       # links
+{indent_str}        t = re.sub(r'\\*\\*([^*]+)\\*\\*', r'\\1', t)               # bold
+{indent_str}        t = re.sub(r'\\*([^*]+)\\*', r'\\1', t)                     # italic
+{indent_str}        t = re.sub(r'~~([^~]+)~~', r'\\1', t)                       # strikethrough
+{indent_str}        t = re.sub(r'`([^`]+)`', r'\\1', t)                         # inline code
+{indent_str}        return t.strip()
+{indent_str}
+{indent_str}    def _parse_markdown_table(text):
+{indent_str}        lines = text.strip().splitlines()
+{indent_str}        table_lines = []
+{indent_str}        for line in lines:
+{indent_str}            s = line.strip()
+{indent_str}            if s.startswith("|") and s.endswith("|"):
+{indent_str}                cells = s.strip("|").split("|")
+{indent_str}                if not all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
+{indent_str}                    table_lines.append(s)
+{indent_str}        if len(table_lines) < 2:
+{indent_str}            raise ValueError("No valid table found")
+{indent_str}        def parse_row(line):
+{indent_str}            return [_strip_markdown(c) for c in line.strip().strip("|").split("|")]
+{indent_str}        return parse_row(table_lines[0]), [parse_row(l) for l in table_lines[1:]]
+{indent_str}
+{indent_str}    # Split content into text and table segments
+{indent_str}    lines = content.splitlines()
+{indent_str}    segments = []
+{indent_str}    i = 0
+{indent_str}    while i < len(lines):
+{indent_str}        stripped = lines[i].strip()
+{indent_str}        if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+{indent_str}            if i + 1 < len(lines):
+{indent_str}                sep = lines[i + 1].strip()
+{indent_str}                if sep.startswith("|") and sep.endswith("|"):
+{indent_str}                    cells = sep.strip("|").split("|")
+{indent_str}                    if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
+{indent_str}                        j = i + 2
+{indent_str}                        while j < len(lines):
+{indent_str}                            s = lines[j].strip()
+{indent_str}                            if s.startswith("|") and s.endswith("|"):
+{indent_str}                                j += 1
+{indent_str}                            else:
+{indent_str}                                break
+{indent_str}                        segments.append(("\\n".join(lines[i:j]), "table"))
+{indent_str}                        i = j
+{indent_str}                        continue
+{indent_str}        non_table_lines = []
+{indent_str}        while i < len(lines):
+{indent_str}            s = lines[i].strip()
+{indent_str}            if s.startswith("|") and s.endswith("|") and len(s) > 2:
+{indent_str}                if i + 1 < len(lines):
+{indent_str}                    sep = lines[i + 1].strip()
+{indent_str}                    if sep.startswith("|") and sep.endswith("|"):
+{indent_str}                        cells = sep.strip("|").split("|")
+{indent_str}                        if all(re.match(r"^\\s*[-:]+\\s*$", c) for c in cells):
+{indent_str}                            break
+{indent_str}            non_table_lines.append(lines[i])
+{indent_str}            i += 1
+{indent_str}        seg_text = "\\n".join(non_table_lines).strip()
+{indent_str}        if seg_text:
+{indent_str}            segments.append((seg_text, "text"))
+{indent_str}
+{indent_str}    if not segments:
+{indent_str}        return None
+{indent_str}
+{indent_str}    elements = []
+{indent_str}    for seg_text, kind in segments:
+{indent_str}        if kind == "table":
+{indent_str}            try:
+{indent_str}                headers, rows = _parse_markdown_table(seg_text)
+{indent_str}                widths = _calc_column_widths(headers, rows)
+{indent_str}                columns = [{{"name": h, "width": w}} for h, w in zip(headers, widths)]
+{indent_str}                obj_rows = []
+{indent_str}                for row in rows:
+{indent_str}                    obj = {{}}
+{indent_str}                    for j in range(len(headers)):
+{indent_str}                        obj[headers[j]] = row[j] if j < len(row) else ""
+{indent_str}                    obj_rows.append(obj)
+{indent_str}                elements.append({{"tag": "table", "columns": columns, "rows": obj_rows}})
+{indent_str}            except ValueError:
+{indent_str}                if seg_text.strip():
+{indent_str}                    elements.append({{"tag": "markdown", "content": seg_text}})
+{indent_str}        else:
+{indent_str}            if seg_text.strip():
+{indent_str}                elements.append({{"tag": "markdown", "content": seg_text}})
+{indent_str}
+{indent_str}    if not elements:
+{indent_str}        return None
+{indent_str}
 {indent_str}    return {{
-{indent_str}        "zh_cn": {{
-{indent_str}            "title": "",
-{indent_str}            "content": [[{{"tag": "md", "text": content}}]],
-{indent_str}        }}
+{indent_str}        "schema": "2.0",
+{indent_str}        "config": {{"width_mode": "fill"}},
+{indent_str}        "body": {{"elements": elements}},
 {indent_str}    }}
 {indent_str}{marker}_END
 '''.format(marker=marker, indent_str=indent_str)
@@ -201,10 +320,10 @@ method_start = method_match.end()
 
 table_detection = '''
         {marker}
-        # Detect markdown tables and send as post+tag:md instead of plain text
-        post_payload = self._build_post_with_md({content_var})
-        if post_payload:
-            return "post", json.dumps(post_payload, ensure_ascii=False)
+        # Detect markdown tables and send as interactive card with native table component
+        card = self._build_table_card({content_var})
+        if card:
+            return "interactive", json.dumps(card, ensure_ascii=False)
         {marker}_SKIP
 '''.format(marker=marker, content_var=content_var)
 
@@ -213,12 +332,12 @@ src = src[:method_start] + table_detection + src[method_start:]
 with open(feishu_path, "w", encoding="utf-8") as f:
     f.write(src)
 
-print("Patched FeishuAdapter: added _build_post_with_md() and table detection in _build_outbound_payload")
+print("Patched FeishuAdapter: added _build_table_card() and table detection in _build_outbound_payload")
 PATCH_SCRIPT
 
     echo ""
     echo "Patch applied successfully!"
-    echo "Hermes will now send markdown tables as post+tag:md messages."
+    echo "Hermes will now send markdown tables as interactive cards with native table component."
     echo "Restart Hermes Agent to activate: hermes restart"
 }
 
