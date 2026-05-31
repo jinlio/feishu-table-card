@@ -194,7 +194,13 @@ helper_method = '''
 {indent_str}            raise ValueError("No valid table found")
 {indent_str}        def parse_row(line):
 {indent_str}            return [_strip_markdown(c) for c in line.strip().strip("|").split("|")]
-{indent_str}        return parse_row(table_lines[0]), [parse_row(l) for l in table_lines[1:]]
+{indent_str}        headers = parse_row(table_lines[0])
+{indent_str}        rows = [parse_row(l) for l in table_lines[1:]]
+{indent_str}        # Replace empty headers with default names
+{indent_str}        for idx in range(len(headers)):
+{indent_str}            if not headers[idx]:
+{indent_str}                headers[idx] = f"列{{idx + 1}}"
+{indent_str}        return headers, rows
 {indent_str}
 {indent_str}    # Split content into text and table segments
 {indent_str}    lines = content.splitlines()
