@@ -249,12 +249,17 @@ helper_method = '''
 {indent_str}            try:
 {indent_str}                headers, rows = _parse_markdown_table(seg_text)
 {indent_str}                widths = _calc_column_widths(headers, rows)
-{indent_str}                columns = [{{"name": h, "width": w}} for h, w in zip(headers, widths)]
+{indent_str}                # Use generic column keys for binding; headers go as first data row
+{indent_str}                # because Feishu tag:table columns[].name is only for data binding,
+{indent_str}                # not for visual header display
+{indent_str}                col_keys = [f"c{{i}}" for i in range(len(headers))]
+{indent_str}                columns = [{{"name": ck, "width": w}} for ck, w in zip(col_keys, widths)]
+{indent_str}                all_rows = [headers] + rows
 {indent_str}                obj_rows = []
-{indent_str}                for row in rows:
+{indent_str}                for row in all_rows:
 {indent_str}                    obj = {{}}
 {indent_str}                    for j in range(len(headers)):
-{indent_str}                        obj[headers[j]] = row[j] if j < len(row) else ""
+{indent_str}                        obj[col_keys[j]] = row[j] if j < len(row) else ""
 {indent_str}                    obj_rows.append(obj)
 {indent_str}                elements.append({{"tag": "table", "columns": columns, "rows": obj_rows}})
 {indent_str}            except ValueError:
