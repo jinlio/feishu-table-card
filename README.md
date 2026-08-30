@@ -1,5 +1,10 @@
 # Feishu Table Patch
 
+> [!IMPORTANT]
+> **本项目已归档（2026-08-30）**：Hermes 官方更新已包含原生表格渲染支持，本项目的使命完成，不再维护。
+> 感谢 [@iqjiy](https://github.com/iqjiy) 的两个贡献（bug 修复 + 原生 table 组件，见 [PR #1](https://github.com/jinlio/feishu-table-patch/pull/1) / [PR #2](https://github.com/jinlio/feishu-table-patch/pull/2)），最终版本 v11.0.0 已合并。
+> 仍在使用旧版 Hermes 的用户可继续 fork 使用。
+
 > 让 Hermes Agent 的飞书适配器正确渲染 Markdown 表格。
 
 Hermes 的飞书适配器检测到 Markdown 表格时，会强制用纯文本 `msg_type: text` 发送，导致表格在飞书中无法正确渲染。本工具通过 patch 适配器，让检测到表格时改用 `msg_type: post` + `tag: md` 发送富文本消息，表格完美渲染。
