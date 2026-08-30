@@ -10,9 +10,20 @@ Hermes 的飞书适配器检测到 Markdown 表格时，会强制用纯文本 `m
 
 | 模式 | 说明 | 触发方式 |
 |------|------|----------|
-| **Post（推荐）** | `msg_type: post` + `tag: md`，支持所有 GFM 语法 | 自动（patch） |
+| **Card（推荐）** | `msg_type: interactive` + 原生 `tag: table` 组件，**自适应列宽** | 自动（patch） |
+| **Post（旧版）** | `msg_type: post` + `tag: md`，支持所有 GFM 语法 | 自动（降级） |
 | **Card（旧版）** | Schema 2.0 卡片 + `tag: markdown` | `--card` |
 | **Text（兜底）** | 转为纯文本列表 | `--text` |
+
+### 自适应列宽
+
+Patch 自动检测 Markdown 表格，解析后转为飞书原生 table 组件，并按内容长度自动计算列宽：
+
+- 中文字符权重 ×2，英文/数字权重 ×1
+- 列宽范围约束 12%–75%
+- 自动修正总和为 100%
+- 表格单元格中的 Markdown 格式符（`**粗体**`、`*斜体*` 等）自动清洗为纯文本
+- 文字部分保留 `tag: markdown`，支持全部 GFM 语法（粗体、斜体、代码块、列表等）
 
 ## 安装
 
@@ -120,9 +131,13 @@ Post 模式（`tag: md`）支持 GFM 全部语法：
 
 `install.sh` patch Hermes 的 `FeishuAdapter._build_outbound_payload` 方法：
 
-1. 在 `FeishuAdapter` 类中注入 `_build_post_with_md()` 方法
+1. 在 `FeishuAdapter` 类中注入 `_build_table_card()` 方法
 2. 在 `_build_outbound_payload` 方法开头插入表格检测逻辑
-3. 检测到表格时，调用 `_build_post_with_md()` 构建 `post + tag:md` payload 并返回
+3. 检测到表格时：
+   - 拆分文字段落和表格段落
+   - 文字 → `tag: markdown`（保留全部 GFM 语法）
+   - 表格 → 解析 → 计算自适应列宽 → 原生 `tag: table` 组件
+   - 组装为 `msg_type: interactive` card 发送
 4. 未检测到表格时，走原始逻辑不变
 
 **整个过程不经过 LLM**，直接在适配器层完成转换，零 token 消耗。
@@ -131,7 +146,7 @@ Post 模式（`tag: md`）支持 GFM 全部语法：
 
 | 问题 | 原因 | 解决方案 |
 |------|------|---------|
-| 飞书卡片 `tag: table` 空白 | 飞书客户端 Bug | 使用 `tag: md` 模式 |
+| ~~飞书卡片 `tag: table` 空白~~ | ~~飞书客户端 Bug~~ | **已修复**（v11.0.0），原生 table 组件正常渲染 |
 | `tag: lark_md` 报错 | 错误的 tag 名称 | 使用 `tag: md` |
 
 ## 项目结构
@@ -139,10 +154,11 @@ Post 模式（`tag: md`）支持 GFM 全部语法：
 ```
 feishu-table-patch/
 ├── README.md                       # 本文件
-├── install.sh                      # Patch 安装脚本（修改 _build_outbound_payload）
+├── install.sh                      # Patch 安装脚本（注入 _build_table_card）
 ├── scripts/
 │   ├── config.json                # 消息配置（标题栏）
-│   └── feishu_table_card.py        # 核心脚本（独立 CLI 使用）
+│   ├── feishu_table_card.py        # 核心脚本（独立 CLI 使用）
+│   └── verify_table_component.py  # 原生 table 组件验证脚本
 └── references/
     ├── feishu-table-rendering-issue.md
     ├── feishu-card-table-api.md
@@ -154,6 +170,7 @@ feishu-table-patch/
 由 **[jinlio](https://github.com/jinlio)** 开发维护。
 
 版本历史：
+- **v11.0.0** — 主模式改为 interactive card + 原生 table 组件，自适应列宽，文字保留 GFM
 - **v10.0.0** — 主模式改为 post+tag:md；直接 patch _build_outbound_payload（跳过 LLM）
 - **v9.2.0** — 新增 outgoing:feishu hook + install.sh patch 脚本
 - **v9.1.0** — 卡片标题栏可选；新增 config.json
